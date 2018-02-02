@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Usage: build_zynq_kernel_image.sh [zynq|zynqmp] [dt_file] [path_cross_toolchain]
+# Usage: build_zynq_kernel_image.sh [zynq|zynqmp] [kernel_dir] [dt_file] [path_cross_toolchain]
 #  If no 'zynq' or 'zynqmp' is specified, 'zynq' is the default value
 #  If no dt_file is specified, the default is `zynq-zc702-adv7511-ad9361-fmcomms2-3.dtb`
 #  If no CROSS_COMPILE specified, a GCC toolchain will be downloaded
@@ -16,8 +16,9 @@ set -e
 #
 
 ZYNQ_TYPE="$1"
-DTFILE="$2"
-CROSS_COMPILE="$3"
+LINUX_DIR="${2:-linux-adi}"
+DTFILE="$3"
+CROSS_COMPILE="$4"
 
 HOST=${HOST:-x86_64}
 
@@ -65,13 +66,13 @@ get_linaro_link() {
 
 # Get ADI Linux if not downloaded
 # We won't do any `git pull` to update the tree, users can choose to do that manually
-[ -d linux-adi ] || \
-	git clone https://github.com/analogdevicesinc/linux.git linux-adi
+[ -d "$LINUX_DIR" ] || \
+	git clone https://github.com/analogdevicesinc/linux.git "$LINUX_DIR"
 
 export ARCH
 export CROSS_COMPILE
 
-pushd linux-adi
+pushd "$LINUX_DIR"
 
 make $DEFCONFIG
 
@@ -87,8 +88,8 @@ make $DTFILE
 
 popd 1> /dev/null
 
-cp -f linux-adi/arch/$ARCH/boot/$IMG_NAME .
-cp -f linux-adi/arch/$ARCH/boot/dts/$DTFILE .
+cp -f $LINUX_DIR/arch/$ARCH/boot/$IMG_NAME .
+cp -f $LINUX_DIR/arch/$ARCH/boot/dts/$DTFILE .
 
 echo "Exported files: $IMG_NAME, $DTFILE"
 
