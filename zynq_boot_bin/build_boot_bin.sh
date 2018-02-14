@@ -1,4 +1,5 @@
 #!/bin/bash
+set -ex
 
 HDF_FILE=$1
 UBOOT_FILE=$2
@@ -39,27 +40,27 @@ mkdir -p $OUTPUT_DIR
 mkdir -p $BUILD_DIR
 
 cp $HDF_FILE $BUILD_DIR/
-cp $UBOOT_FILE $OUTPUT_DIR/
+cp $UBOOT_FILE $OUTPUT_DIR/u-boot.elf
 cp $HDF_FILE $OUTPUT_DIR/
 
 ### Create create_fsbl_project.tcl file used by xsdk to create the fsbl
-echo hsi open_hw_design $HDF_FILE > $BUILD_DIR/create_fsbl_project.tcl
+echo "hsi open_hw_design $HDF_FILE" > $BUILD_DIR/create_fsbl_project.tcl
 echo 'set cpu_name [lindex [hsi get_cells -filter {IP_TYPE==PROCESSOR}] 0]' >> $BUILD_DIR/create_fsbl_project.tcl
 echo 'sdk setws ./build/sdk' >> $BUILD_DIR/create_fsbl_project.tcl
-echo sdk createhw -name hw_0 -hwspec $HDF_FILE >> $BUILD_DIR/create_fsbl_project.tcl
+echo "sdk createhw -name hw_0 -hwspec $HDF_FILE" >> $BUILD_DIR/create_fsbl_project.tcl
 echo 'sdk createapp -name fsbl -hwproject hw_0 -proc $cpu_name -os standalone -lang C -app {Zynq FSBL}' >> $BUILD_DIR/create_fsbl_project.tcl
 echo 'configapp -app fsbl build-config release' >> $BUILD_DIR/create_fsbl_project.tcl
 echo 'sdk projects -build -type all' >> $BUILD_DIR/create_fsbl_project.tcl
 
 ### Create zynq.bif file used by bootgen
-echo the_ROM_image: > $OUTPUT_DIR/zynq.bif
-echo { >> $OUTPUT_DIR/zynq.bif
-echo [bootloader] fsbl.elf >> $OUTPUT_DIR/zynq.bif
-echo system_top.bit >> $OUTPUT_DIR/zynq.bif
-echo $UBOOT_FILE >> $OUTPUT_DIR/zynq.bif
-echo } >> $OUTPUT_DIR/zynq.bif
+echo 'the_ROM_image:' > $OUTPUT_DIR/zynq.bif
+echo '{' >> $OUTPUT_DIR/zynq.bif
+echo '[bootloader] fsbl.elf' >> $OUTPUT_DIR/zynq.bif
+echo 'system_top.bit' >> $OUTPUT_DIR/zynq.bif
+echo 'u-boot.elf' >> $OUTPUT_DIR/zynq.bif
+echo '}' >> $OUTPUT_DIR/zynq.bif
 
-### Build fsbl.elf & pmufw.elf
+### Build fsbl.elf
 (
 	cd $BUILD_DIR
 	xsdk -batch -source create_fsbl_project.tcl
