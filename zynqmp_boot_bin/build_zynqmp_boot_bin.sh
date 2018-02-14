@@ -1,0 +1,115 @@
+#!/bin/bash
+
+HDF_FILE=$1
+UBOOT_FILE=$2
+ATF_FILE=$3
+BUILD_DIR=build_boot_bin
+OUTPUT_DIR=output_boot_bin
+
+usage () {
+	echo "usage: $0 system_top.hdf u-boot.elf (bl31.elf | <path-to-arm-trusted-firmware-source>) [output-archive]"
+	exit 1
+}
+
+depends () {
+	echo "Xilinx $1 must be installed and in your PATH"
+	echo "try: source /opt/Xilinx/Vivado/201x.x/settings64.sh"
+	exit 1
+}
+
+### Check command line parameters
+echo $HDF_FILE | grep -q ".hdf" || usage
+echo $UBOOT_FILE | grep -q -e ".elf" -e "uboot" || usage
+
+if [ ! -f $HDF_FILE ]; then
+    echo $HDF_FILE: File not found!
+    usage
+fi
+
+if [ ! -f $UBOOT_FILE ]; then
+    echo $UBOOT_FILE: File not found!
+    usage
+fi
+
+### Check for required Xilinx tools
+command -v xsdk >/dev/null 2>&1 || depends xsdk
+command -v bootgen >/dev/null 2>&1 || depends bootgen
+
+rm -Rf $BUILD_DIR $OUTPUT_DIR
+mkdir -p $OUTPUT_DIR
+mkdir -p $BUILD_DIR
+
+### Check if ATF_FILE is .elf or path to arm-trusted-firmware
+if [ "$ATF_FILE" != "" ] && [ -d $ATF_FILE ]; then
+### Build arm-trusted-firmware bl31.elf
+(
+	cd $ATF_FILE
+	make distclean
+	make CROSS_COMPILE=aarch64-linux-gnu- PLAT=zynqmp RESET_TO_BL31=1
+)
+	cp $ATF_FILE/build/zynqmp/release/bl31/bl31.elf $OUTPUT_DIR/bl31.elf
+else
+	echo $ATF_FILE | grep -q -e "bl31.elf" || usage
+	if [ ! -f $ATF_FILE ]; then
+		echo $ATF_FILE: File not found!
+		usage
+	fi
+	cp $ATF_FILE $OUTPUT_DIR/bl31.elf
+fi
+
+cp $HDF_FILE $BUILD_DIR/
+cp $UBOOT_FILE $OUTPUT_DIR/u-boot.elf
+cp $HDF_FILE $OUTPUT_DIR/
+
+### Create create_fsbl_project.tcl file used by xsdk to create the fsbl
+echo "hsi open_hw_design $HDF_FILE" > $BUILD_DIR/create_fsbl_project.tcl
+echo 'set cpu_name [lindex [hsi get_cells -filter {IP_TYPE==PROCESSOR}] 0]' >> $BUILD_DIR/create_fsbl_project.tcl
+echo 'sdk setws ./build/sdk' >> $BUILD_DIR/create_fsbl_project.tcl
+echo "sdk createhw -name hw_0 -hwspec $HDF_FILE" >> $BUILD_DIR/create_fsbl_project.tcl
+echo 'sdk createapp -name fsbl -hwproject hw_0 -proc $cpu_name -os standalone -lang C -app {Zynq MP FSBL}' >> $BUILD_DIR/create_fsbl_project.tcl
+echo 'configapp -app fsbl build-config release' >> $BUILD_DIR/create_fsbl_project.tcl
+echo 'sdk projects -build -type all' >> $BUILD_DIR/create_fsbl_project.tcl
+
+### Create create_pmufw_project.tcl
+echo "set hwdsgn [open_hw_design $HDF_FILE]" > $BUILD_DIR/create_pmufw_project.tcl
+echo 'generate_app -hw $hwdsgn -os standalone -proc psu_pmu_0 -app zynqmp_pmufw -sw pmufw -dir pmufw' >> $BUILD_DIR/create_pmufw_project.tcl
+echo 'quit' >> $BUILD_DIR/create_pmufw_project.tcl
+
+### Create zynq.bif file used by bootgen
+echo "the_ROM_image:" > $OUTPUT_DIR/zynq.bif
+echo "{" >> $OUTPUT_DIR/zynq.bif
+echo "[fsbl_config] a53_x64" >> $OUTPUT_DIR/zynq.bif
+echo "[bootloader] fsbl.elf" >> $OUTPUT_DIR/zynq.bif
+echo "[pmufw_image] pmufw.elf" >> $OUTPUT_DIR/zynq.bif
+echo "[destination_cpu=a53-0,exception_level=el-3,trustzone] bl31.elf" >> $OUTPUT_DIR/zynq.bif
+echo "[destination_device=pl] system_top.bit" >> $OUTPUT_DIR/zynq.bif
+echo "[destination_cpu=a53-0, exception_level=el-2] u-boot.elf" >> $OUTPUT_DIR/zynq.bif
+echo "}" >> $OUTPUT_DIR/zynq.bif
+
+
+### Build fsbl.elf & pmufw.elf
+(
+	cd $BUILD_DIR
+	xsdk -batch -source create_fsbl_project.tcl
+	hsi -source create_pmufw_project.tcl
+	### There was a bug in some vivado version where they build would fail -> check CC_FLAGS
+	grep "CC_FLAGS :=" pmufw/Makefile | grep -e "-Os" || sed -i '/-mxl-soft-mul/ s/$/ -Os -flto -ffat-lto-objects/' pmufw/Makefile
+	cd pmufw
+	make
+)
+
+### Copy fsbl and system_top.bit into the output folder
+cp $BUILD_DIR/build/sdk/fsbl/Release/fsbl.elf $OUTPUT_DIR/fsbl.elf
+cp $BUILD_DIR/build/sdk/hw_0/system_top.bit $OUTPUT_DIR/system_top.bit
+cp $BUILD_DIR/pmufw/executable.elf $OUTPUT_DIR/pmufw.elf
+
+### Build BOOT.BIN
+(
+	cd $OUTPUT_DIR
+	bootgen -arch zynqmp -image zynq.bif -o BOOT.BIN -w
+)
+
+### Optionally tar.gz the entire output folder with the name given in argument 3
+if [ ${#4} -ne 0 ]; then
+	tar czvf $3.tar.gz $OUTPUT_DIR
+fi
