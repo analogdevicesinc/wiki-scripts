@@ -1,4 +1,5 @@
 #!/bin/bash
+set -ex
 
 HDF_FILE=$1
 UBOOT_FILE=$2
@@ -7,7 +8,7 @@ BUILD_DIR=build_boot_bin
 OUTPUT_DIR=output_boot_bin
 
 usage () {
-	echo "usage: $0 system_top.hdf u-boot.elf (bl31.elf | <path-to-arm-trusted-firmware-source>) [output-archive]"
+	echo "usage: $0 system_top.hdf u-boot.elf  (download | bl31.elf | <path-to-arm-trusted-firmware-source>) [output-archive]"
 	exit 1
 }
 
@@ -48,6 +49,15 @@ if [ "$ATF_FILE" != "" ] && [ -d $ATF_FILE ]; then
 	make CROSS_COMPILE=aarch64-linux-gnu- PLAT=zynqmp RESET_TO_BL31=1
 )
 	cp $ATF_FILE/build/zynqmp/release/bl31/bl31.elf $OUTPUT_DIR/bl31.elf
+elif [ "$ATF_FILE" == "download" ]; then
+(
+	command -v git >/dev/null 2>&1 || depends git
+	cd $BUILD_DIR
+	git clone https://github.com/Xilinx/arm-trusted-firmware.git
+	cd arm-trusted-firmware
+	make CROSS_COMPILE=aarch64-linux-gnu- PLAT=zynqmp RESET_TO_BL31=1
+)
+	cp $BUILD_DIR/arm-trusted-firmware/build/zynqmp/release/bl31/bl31.elf $OUTPUT_DIR/bl31.elf
 else
 	echo $ATF_FILE | grep -q -e "bl31.elf" || usage
 	if [ ! -f $ATF_FILE ]; then
@@ -111,5 +121,5 @@ cp $BUILD_DIR/pmufw/executable.elf $OUTPUT_DIR/pmufw.elf
 
 ### Optionally tar.gz the entire output folder with the name given in argument 3
 if [ ${#4} -ne 0 ]; then
-	tar czvf $3.tar.gz $OUTPUT_DIR
+	tar czvf $4.tar.gz $OUTPUT_DIR
 fi
