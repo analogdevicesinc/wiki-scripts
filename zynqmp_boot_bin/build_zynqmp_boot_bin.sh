@@ -72,16 +72,16 @@ cp $UBOOT_FILE $OUTPUT_DIR/u-boot.elf
 cp $HDF_FILE $OUTPUT_DIR/
 
 ### Create create_fsbl_project.tcl file used by xsdk to create the fsbl
-echo "hsi open_hw_design $HDF_FILE" > $BUILD_DIR/create_fsbl_project.tcl
+echo "hsi open_hw_design `basename $HDF_FILE`" > $BUILD_DIR/create_fsbl_project.tcl
 echo 'set cpu_name [lindex [hsi get_cells -filter {IP_TYPE==PROCESSOR}] 0]' >> $BUILD_DIR/create_fsbl_project.tcl
 echo 'sdk setws ./build/sdk' >> $BUILD_DIR/create_fsbl_project.tcl
-echo "sdk createhw -name hw_0 -hwspec $HDF_FILE" >> $BUILD_DIR/create_fsbl_project.tcl
+echo "sdk createhw -name hw_0 -hwspec `basename $HDF_FILE`" >> $BUILD_DIR/create_fsbl_project.tcl
 echo 'sdk createapp -name fsbl -hwproject hw_0 -proc $cpu_name -os standalone -lang C -app {Zynq MP FSBL}' >> $BUILD_DIR/create_fsbl_project.tcl
 echo 'configapp -app fsbl build-config release' >> $BUILD_DIR/create_fsbl_project.tcl
 echo 'sdk projects -build -type all' >> $BUILD_DIR/create_fsbl_project.tcl
 
 ### Create create_pmufw_project.tcl
-echo "set hwdsgn [open_hw_design $HDF_FILE]" > $BUILD_DIR/create_pmufw_project.tcl
+echo "set hwdsgn [open_hw_design `basename $HDF_FILE`]" > $BUILD_DIR/create_pmufw_project.tcl
 echo 'generate_app -hw $hwdsgn -os standalone -proc psu_pmu_0 -app zynqmp_pmufw -sw pmufw -dir pmufw' >> $BUILD_DIR/create_pmufw_project.tcl
 echo 'quit' >> $BUILD_DIR/create_pmufw_project.tcl
 
