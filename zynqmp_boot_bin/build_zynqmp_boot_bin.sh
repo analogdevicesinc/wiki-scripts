@@ -55,6 +55,9 @@ elif [ "$ATF_FILE" == "download" ]; then
 	cd $BUILD_DIR
 	git clone https://github.com/Xilinx/arm-trusted-firmware.git
 	cd arm-trusted-firmware
+	# 2017.4 use 47af34b94a52b8cdc8abbac44b6f3ffab33a2206
+	# 2018.1 use df4a7e97d57494c7d79de51b1e0e450d982cea98
+	git checkout 47af34b94a52b8cdc8abbac44b6f3ffab33a2206
 	make CROSS_COMPILE=aarch64-linux-gnu- PLAT=zynqmp RESET_TO_BL31=1
 )
 	cp $BUILD_DIR/arm-trusted-firmware/build/zynqmp/release/bl31/bl31.elf $OUTPUT_DIR/bl31.elf
