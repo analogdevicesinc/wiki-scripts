@@ -35,10 +35,19 @@ fi
 ### Check for required Xilinx tools
 command -v xsdk >/dev/null 2>&1 || depends xsdk
 command -v bootgen >/dev/null 2>&1 || depends bootgen
+command -v hsi >/dev/null 2>&1 || depends hsi
 
 rm -Rf $BUILD_DIR $OUTPUT_DIR
 mkdir -p $OUTPUT_DIR
 mkdir -p $BUILD_DIR
+
+# 2017.4 use 47af34b94a52b8cdc8abbac44b6f3ffab33a2206
+# 2018.1 use df4a7e97d57494c7d79de51b1e0e450d982cea98
+# 2018.2 use 93a69a5a3bc318027da4af5911124537f4907642
+
+atf_version=47af34b94a52b8cdc8abbac44b6f3ffab33a2206
+hsi -version | grep -q v2018.1 && atf_version=df4a7e97d57494c7d79de51b1e0e450d982cea98
+hsi -version | grep -q v2018.2 && atf_version=93a69a5a3bc318027da4af5911124537f4907642
 
 ### Check if ATF_FILE is .elf or path to arm-trusted-firmware
 if [ "$ATF_FILE" != "" ] && [ -d $ATF_FILE ]; then
@@ -46,6 +55,7 @@ if [ "$ATF_FILE" != "" ] && [ -d $ATF_FILE ]; then
 (
 	cd $ATF_FILE
 	make distclean
+	git checkout $atf_version
 	make CROSS_COMPILE=aarch64-linux-gnu- PLAT=zynqmp RESET_TO_BL31=1
 )
 	cp $ATF_FILE/build/zynqmp/release/bl31/bl31.elf $OUTPUT_DIR/bl31.elf
@@ -55,9 +65,7 @@ elif [ "$ATF_FILE" == "download" ]; then
 	cd $BUILD_DIR
 	git clone https://github.com/Xilinx/arm-trusted-firmware.git
 	cd arm-trusted-firmware
-	# 2017.4 use 47af34b94a52b8cdc8abbac44b6f3ffab33a2206
-	# 2018.1 use df4a7e97d57494c7d79de51b1e0e450d982cea98
-	git checkout 47af34b94a52b8cdc8abbac44b6f3ffab33a2206
+	git checkout $atf_version
 	make CROSS_COMPILE=aarch64-linux-gnu- PLAT=zynqmp RESET_TO_BL31=1
 )
 	cp $BUILD_DIR/arm-trusted-firmware/build/zynqmp/release/bl31/bl31.elf $OUTPUT_DIR/bl31.elf
@@ -94,8 +102,8 @@ echo "{" >> $OUTPUT_DIR/zynq.bif
 echo "[fsbl_config] a53_x64" >> $OUTPUT_DIR/zynq.bif
 echo "[bootloader] fsbl.elf" >> $OUTPUT_DIR/zynq.bif
 echo "[pmufw_image] pmufw.elf" >> $OUTPUT_DIR/zynq.bif
-echo "[destination_cpu=a53-0,exception_level=el-3,trustzone] bl31.elf" >> $OUTPUT_DIR/zynq.bif
 echo "[destination_device=pl] system_top.bit" >> $OUTPUT_DIR/zynq.bif
+echo "[destination_cpu=a53-0,exception_level=el-3,trustzone] bl31.elf" >> $OUTPUT_DIR/zynq.bif
 echo "[destination_cpu=a53-0, exception_level=el-2] u-boot.elf" >> $OUTPUT_DIR/zynq.bif
 echo "}" >> $OUTPUT_DIR/zynq.bif
 
