@@ -44,10 +44,12 @@ mkdir -p $BUILD_DIR
 # 2017.4 use 47af34b94a52b8cdc8abbac44b6f3ffab33a2206
 # 2018.1 use df4a7e97d57494c7d79de51b1e0e450d982cea98
 # 2018.2 use 93a69a5a3bc318027da4af5911124537f4907642
+# 2018.3 use 08560c36ea5b6f48b962cb4bd9a79b35bb3d95ce
 
 atf_version=47af34b94a52b8cdc8abbac44b6f3ffab33a2206
 hsi -version | grep -q v2018.1 && atf_version=df4a7e97d57494c7d79de51b1e0e450d982cea98
 hsi -version | grep -q v2018.2 && atf_version=93a69a5a3bc318027da4af5911124537f4907642
+hsi -version | grep -q v2018.3 && atf_version=08560c36ea5b6f48b962cb4bd9a79b35bb3d95ce
 
 ### Check if ATF_FILE is .elf or path to arm-trusted-firmware
 if [ "$ATF_FILE" != "" ] && [ -d $ATF_FILE ]; then
