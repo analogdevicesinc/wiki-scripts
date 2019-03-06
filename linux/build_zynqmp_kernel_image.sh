@@ -2,7 +2,7 @@
 set -e
 
 # Usage: build_zynq_kernel_image.sh [kernel_dir] [dt_file] [path_cross_toolchain]
-#  If no dt_file is specified, the default is `zynq-zc702-adv7511-ad9361-fmcomms2-3.dtb`
+#  If no dt_file is specified, the default is `xilinx/zynqmp-zcu102-rev10-ad9361-fmcomms2-3.dtb`
 #  If no CROSS_COMPILE specified, a GCC toolchain will be downloaded
 #  from Linaro's website and used.
 #  Default host for Linaro's toolchain is assumed x86_64 but it can be
@@ -20,11 +20,11 @@ CROSS_COMPILE="$3"
 
 HOST=${HOST:-x86_64}
 
-DEFCONFIG=zynq_xcomm_adv7511_defconfig
-GCC_ARCH=arm-linux-gnueabi
-IMG_NAME="uImage"
-ARCH=arm
-DTDEFAULT=zynq-zc702-adv7511-ad9361-fmcomms2-3.dtb
+DEFCONFIG=adi_zynqmp_defconfig
+GCC_ARCH=aarch64-linux-gnu
+IMG_NAME="Image"
+ARCH=arm64
+DTDEFAULT=xilinx/zynqmp-zcu102-rev10-ad9361-fmcomms2-3.dtb
 
 [ -n "$NUM_JOBS" ] || NUM_JOBS=5
 
