@@ -69,16 +69,17 @@ make -j$NUM_JOBS $IMG_NAME UIMAGE_LOADADDR=0x8000
 
 if [ -z "$DTFILE" ] ; then
 	echo
-	echo "No DTFILE file specified ; using default '$DTDEFAULT'"
-	DTFILE=$DTDEFAULT
+	echo "No DTFILE file specified"
+	echo
+else
+	make $DTFILE
 fi
-
-make $DTFILE
 
 popd 1> /dev/null
 
 cp -f $LINUX_DIR/arch/$ARCH/boot/$IMG_NAME .
-cp -f $LINUX_DIR/arch/$ARCH/boot/dts/$DTFILE .
+[ -z "$DTFILE" ] || \
+	cp -f $LINUX_DIR/arch/$ARCH/boot/dts/$DTFILE .
 
 echo "Exported files: $IMG_NAME, $DTFILE"
 
