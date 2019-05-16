@@ -84,6 +84,20 @@ cp $HDF_FILE $BUILD_DIR/
 cp $UBOOT_FILE $OUTPUT_DIR/u-boot.elf
 cp $HDF_FILE $OUTPUT_DIR/
 
+# get the tools version (e.g., v2018.3)
+tool_version=$(hsi -version)
+tool_version=${tool_version#hsi\ }
+tool_version=${tool_version%\ (64-bit)*}
+
+# Work-arownd for MPSoC ZCU102 and ZCU106 Evaluation Kits - DDR4 SODIMM change
+# (https://www.xilinx.com/support/answers/71961.html)
+if [ $tool_version == "v2018.3" ];then
+(
+	wget https://www.xilinx.com/Attachment/72113-files.zip -P $BUILD_DIR
+	unzip $BUILD_DIR/72113-files.zip -d  $BUILD_DIR
+)
+fi
+
 ### Create create_fsbl_project.tcl file used by xsdk to create the fsbl
 echo "hsi open_hw_design `basename $HDF_FILE`" > $BUILD_DIR/create_fsbl_project.tcl
 echo 'set cpu_name [lindex [hsi get_cells -filter {IP_TYPE==PROCESSOR}] 0]' >> $BUILD_DIR/create_fsbl_project.tcl
@@ -91,6 +105,13 @@ echo 'sdk setws ./build/sdk' >> $BUILD_DIR/create_fsbl_project.tcl
 echo "sdk createhw -name hw_0 -hwspec `basename $HDF_FILE`" >> $BUILD_DIR/create_fsbl_project.tcl
 echo 'sdk createapp -name fsbl -hwproject hw_0 -proc $cpu_name -os standalone -lang C -app {Zynq MP FSBL}' >> $BUILD_DIR/create_fsbl_project.tcl
 echo 'configapp -app fsbl build-config release' >> $BUILD_DIR/create_fsbl_project.tcl
+if [ $tool_version == "v2018.3" ];then
+(
+	echo "file copy -force xfsbl_ddr_init.c ./build/sdk/fsbl/src" >> $BUILD_DIR/create_fsbl_project.tcl
+	echo "file copy -force xfsbl_hooks.c    ./build/sdk/fsbl/src" >> $BUILD_DIR/create_fsbl_project.tcl
+	echo "file copy -force xfsbl_hooks.h    ./build/sdk/fsbl/src" >> $BUILD_DIR/create_fsbl_project.tcl
+)
+fi
 echo 'sdk projects -build -type all' >> $BUILD_DIR/create_fsbl_project.tcl
 
 ### Create create_pmufw_project.tcl
@@ -101,8 +122,7 @@ echo 'quit' >> $BUILD_DIR/create_pmufw_project.tcl
 ### Create zynq.bif file used by bootgen
 echo "the_ROM_image:" > $OUTPUT_DIR/zynq.bif
 echo "{" >> $OUTPUT_DIR/zynq.bif
-echo "[fsbl_config] a53_x64" >> $OUTPUT_DIR/zynq.bif
-echo "[bootloader] fsbl.elf" >> $OUTPUT_DIR/zynq.bif
+echo "[bootloader,destination_cpu=a53-0] fsbl.elf" >> $OUTPUT_DIR/zynq.bif
 echo "[pmufw_image] pmufw.elf" >> $OUTPUT_DIR/zynq.bif
 echo "[destination_device=pl] system_top.bit" >> $OUTPUT_DIR/zynq.bif
 echo "[destination_cpu=a53-0,exception_level=el-3,trustzone] bl31.elf" >> $OUTPUT_DIR/zynq.bif
