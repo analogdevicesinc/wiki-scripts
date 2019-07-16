@@ -43,7 +43,7 @@ get_linaro_link() {
 # We won't do any `git pull` to update the tree, users can choose to do that manually
 [ -d "$LINUX_DIR" ] || {
 	git clone https://github.com/analogdevicesinc/linux.git "$LINUX_DIR"
-	git checkout rpi-4.14.y
+	git checkout rpi-4.19.y
 }
 
 export ARCH
@@ -53,7 +53,7 @@ pushd "$LINUX_DIR"
 
 make $DEFCONFIG
 
-make -j$NUM_JOBS $IMG_NAME UIMAGE_LOADADDR=0x8000
+make -j$NUM_JOBS
 
 popd 1> /dev/null
 
