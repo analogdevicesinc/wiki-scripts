@@ -26,6 +26,9 @@ IMG_NAME="Image"
 ARCH=arm64
 DTDEFAULT=xilinx/zynqmp-zcu102-rev10-ad9361-fmcomms2-3.dtb
 
+KCFLAGS="-Werror -Wno-error=frame-larger-than="
+export KCFLAGS
+
 [ -n "$NUM_JOBS" ] || NUM_JOBS=5
 
 LINARO_GCC_VERSION="5.5.0-2017.10"

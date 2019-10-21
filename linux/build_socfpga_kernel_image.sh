@@ -13,6 +13,9 @@ IMG_NAME="zImage"
 ARCH=arm
 DTDEFAULT=socfpga_arria10_socdk_sdmmc.dts
 
+KCFLAGS="-Werror -Wno-error=frame-larger-than="
+export KCFLAGS
+
 [ -n "$NUM_JOBS" ] || NUM_JOBS=5
 
 LINARO_GCC_VERSION="5.5.0-2017.10"

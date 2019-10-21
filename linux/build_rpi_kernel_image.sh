@@ -12,6 +12,9 @@ GCC_ARCH=arm-linux-gnueabi
 IMG_NAME="zImage"
 ARCH=arm
 
+KCFLAGS="-Werror -Wno-error=frame-larger-than="
+export KCFLAGS
+
 [ -n "$NUM_JOBS" ] || NUM_JOBS=5
 
 LINARO_GCC_VERSION="5.5.0-2017.10"
