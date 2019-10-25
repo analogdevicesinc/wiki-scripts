@@ -13,7 +13,24 @@ IMG_NAME="zImage"
 ARCH=arm
 DTDEFAULT=socfpga_arria10_socdk_sdmmc.dts
 
-KCFLAGS="-Werror -Wno-error=frame-larger-than="
+# FIXME: remove the line below once Talise & Mykonos APIs
+#        dont't use 1024 bytes on stack
+KCFLAGS="$KCFLAGS -Wno-error=frame-larger-than="
+export KCFLAGS
+
+# FIXME: remove this function once kernel gets upgrade and
+#        GCC doesn't report these warnings anymore
+GCC="${CROSS_COMPILE}gcc"
+if [ "$($GCC -dumpversion)" -ge "8" ]; then
+	KCFLAGS="$KCFLAGS -Wno-error=stringop-truncation"
+	KCFLAGS="$KCFLAGS -Wno-error=packed-not-aligned"
+	KCFLAGS="$KCFLAGS -Wno-error=stringop-overflow= -Wno-error=sizeof-pointer-memaccess"
+	KCFLAGS="$KCFLAGS -Wno-error=missing-attributes"
+fi
+
+if [ "$($GCC -dumpversion)" -ge "9" ]; then
+	KCFLAGS="$KCFLAGS -Wno-error=address-of-packed-member -Wno-error=stringop-truncation"
+fi
 export KCFLAGS
 
 [ -n "$NUM_JOBS" ] || NUM_JOBS=5
