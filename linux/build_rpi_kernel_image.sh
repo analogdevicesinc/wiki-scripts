@@ -8,7 +8,7 @@ CROSS_COMPILE="$3"
 HOST=${HOST:-x86_64}
 
 DEFCONFIG=adi_bcm2709_defconfig
-GCC_ARCH=arm-linux-gnueabi
+GCC_ARCH=arm-linux-gnueabihf
 IMG_NAME="zImage"
 ARCH=arm
 
