@@ -8,7 +8,7 @@ CROSS_COMPILE="$3"
 HOST=${HOST:-x86_64}
 
 DEFCONFIG=socfpga_adi_defconfig
-GCC_ARCH=arm-linux-gnueabi
+GCC_ARCH=arm-linux-gnueabihf
 IMG_NAME="zImage"
 ARCH=arm
 DTDEFAULT=socfpga_arria10_socdk_sdmmc.dts
@@ -18,21 +18,16 @@ export KCFLAGS
 
 [ -n "$NUM_JOBS" ] || NUM_JOBS=5
 
-LINARO_GCC_VERSION="5.5.0-2017.10"
-
-get_linaro_link() {
-	local ver="$1"
-	local gcc_dir="${ver:0:3}-${ver:(-7)}"
-	echo "https://releases.linaro.org/components/toolchain/binaries/$gcc_dir/$GCC_ARCH/$GCC_TAR"
-}
+GCC_VERSION="8.3-2019.03"
 
 # if CROSS_COMPILE hasn't been specified, go with Linaro's
 [ -n "$CROSS_COMPILE" ] || {
 	# set Linaro GCC
-	GCC_DIR=gcc-linaro-${LINARO_GCC_VERSION}-${HOST}_${GCC_ARCH}
-	GCC_TAR=$GCC_DIR.tar.xz
+	GCC_DIR="gcc-arm-${GCC_VERSION}-${HOST}-${GCC_ARCH}"
+	GCC_TAR="$GCC_DIR.tar.xz"
+	GCC_URL="https://developer.arm.com/-/media/Files/downloads/gnu-a/${GCC_VERSION}/binrel/${GCC_TAR}"
 	if [ ! -d "$GCC_DIR" ] && [ ! -e "$GCC_TAR" ] ; then
-		wget "$(get_linaro_link "$LINARO_GCC_VERSION")"
+		wget "$GCC_URL"
 	fi
 	if [ ! -d "$GCC_DIR" ] ; then
 		tar -xvf $GCC_TAR || {
