@@ -20,7 +20,7 @@ CROSS_COMPILE="$3"
 
 HOST=${HOST:-x86_64}
 
-DEFCONFIG=adi_zynqmp_defconfig
+DEFCONFIG=${DEFCONFIG:-adi_zynqmp_defconfig}
 GCC_ARCH=aarch64-linux-gnu
 IMG_NAME="Image"
 ARCH=arm64

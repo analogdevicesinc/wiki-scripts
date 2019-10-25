@@ -20,7 +20,7 @@ CROSS_COMPILE="$3"
 
 HOST=${HOST:-x86_64}
 
-DEFCONFIG=zynq_xcomm_adv7511_defconfig
+DEFCONFIG=${DEFCONFIG:-zynq_xcomm_adv7511_defconfig}
 GCC_ARCH=arm-linux-gnueabihf
 IMG_NAME="uImage"
 ARCH=arm
