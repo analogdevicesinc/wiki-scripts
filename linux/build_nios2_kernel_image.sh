@@ -15,7 +15,7 @@ IMG_NAME=zImage
 
 NUM_JOBS=${NUM_JOBS:-4}
 
-KCFLAGS="-Werror -Wno-error=frame-larger-than="
+KCFLAGS="-Wno-error=frame-larger-than="
 export KCFLAGS
 
 # if CROSS_COMPILE hasn't been specified, fail here
