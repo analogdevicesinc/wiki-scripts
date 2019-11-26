@@ -28,24 +28,27 @@ DTDEFAULT=zynq-zc702-adv7511-ad9361-fmcomms2-3.dtb
 
 [ -n "$NUM_JOBS" ] || NUM_JOBS=5
 
-GCC_VERSION="8.3-2019.03"
-
-# if CROSS_COMPILE hasn't been specified, go with Linaro's
+# if CROSS_COMPILE hasn't been specified, go with a few defaults
 [ -n "$CROSS_COMPILE" ] || {
-	# set Linaro GCC
-	GCC_DIR="gcc-arm-${GCC_VERSION}-${HOST}-${GCC_ARCH}"
-	GCC_TAR="$GCC_DIR.tar.xz"
-	GCC_URL="https://developer.arm.com/-/media/Files/downloads/gnu-a/${GCC_VERSION}/binrel/${GCC_TAR}"
-	if [ ! -d "$GCC_DIR" ] && [ ! -e "$GCC_TAR" ] ; then
-		wget "$GCC_URL"
+	CROSS_COMPILE=${GCC_ARCH}-gcc
+	if type "${GCC_ARCH}-gcc" >/dev/null 2>&1 ; then
+		CROSS_COMPILE="${GCC_ARCH}-"
+	else
+		GCC_VERSION="8.3-2019.03"
+		GCC_DIR="gcc-arm-${GCC_VERSION}-${HOST}-${GCC_ARCH}"
+		GCC_TAR="$GCC_DIR.tar.xz"
+		GCC_URL="https://developer.arm.com/-/media/Files/downloads/gnu-a/${GCC_VERSION}/binrel/${GCC_TAR}"
+		if [ ! -d "$GCC_DIR" ] && [ ! -e "$GCC_TAR" ] ; then
+			wget "$GCC_URL"
+		fi
+		if [ ! -d "$GCC_DIR" ] ; then
+			tar -xvf $GCC_TAR || {
+				echo "'$GCC_TAR' seems invalid ; remove it and re-download it"
+				exit 1
+			}
+		fi
+		CROSS_COMPILE=$(pwd)/$GCC_DIR/bin/${GCC_ARCH}-
 	fi
-	if [ ! -d "$GCC_DIR" ] ; then
-		tar -xvf $GCC_TAR || {
-			echo "'$GCC_TAR' seems invalid ; remove it and re-download it"
-			exit 1
-		}
-	fi
-	CROSS_COMPILE=$(pwd)/$GCC_DIR/bin/${GCC_ARCH}-
 }
 
 # FIXME: remove the line below once Talise & Mykonos APIs
