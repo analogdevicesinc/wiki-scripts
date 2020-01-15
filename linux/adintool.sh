@@ -14,6 +14,8 @@ usage() {
 	echo "  cable_diagnostics <eth> - run cable diagnostics on cable"
 	echo "                            WARNING: puts device into special mode."
 	echo "                                     device won't send data during this mode"
+	echo "  sop <eth> - Show RX & TX Start-of-Packet settings that are configured"
+	echo "              The 'phy_write_mmd' command can be used to configure/change settings"
 }
 
 [ -n "$1" ] || {
@@ -199,6 +201,22 @@ cable_diagnostics() {
 	phytool write $eth/0/0x0017 0x3048
 }
 
+sop() {
+	local eth="$1"
+
+	check_eth_device_or_exit "$eth"
+
+	idx=0
+	echo "SOP 1588 regs:"
+	for reg in $__sop_regs ; do
+		local val="$(phy_read_mmd $eth $reg)"
+		local mmd_idx=$(index_in_list __mmd_regs $reg)
+		local name="$(get_item_from_list $mmd_idx $__mmd_regnames)"
+		echo "$reg = $val - $name"
+		idx=$((idx + 1))
+	done
+}
+
 __phy_regs="0x0000 0x0001 0x0002 0x0003 0x0004 0x0005 0x0006 0x0007 0x0008
 	    0x0009 0x000A 0x000F 0x0010 0x0011 0x0012 0x0013 0x0014 0x0015
 	    0x0016 0x0017 0x0018 0x0019 0x001A 0x001B 0x001C 0x001D 0x001F"
@@ -212,6 +230,8 @@ __phy_regnames="MII_CONTROL MII_STATUS PHY_ID_1 PHY_ID_2 AUTONEG_ADV LP_ABILITY 
 __cable_diags_rslt_mmd_regs="0xBA1D 0xBA1E 0xBA1F 0xBA20 0xBA21 0xBA22 0xBA23
 			     0xBA24 0xBA25"
 
+__sop_regs="0x9428 0x9429 0x942A 0xFF3D 0xFF3E 0xFF3F 0xFF41"
+
 __mmd_regs="0x8000 0x8001 0x8002 0x8008 0x8402 0x8403 0x8404 0x8405 0x9400
 	    0x9401 0x9403 0x9406 0x9407 0x9408 0x940A 0x940B 0x940C 0x940D
 	    0x940E 0x940F 0x9410 0x9411 0x9412 0x9413 0x9414 0x9415 0x9416
@@ -220,6 +240,7 @@ __mmd_regs="0x8000 0x8001 0x8002 0x8008 0x8402 0x8403 0x8404 0x8405 0x9400
 	    0xBC00
 	    0xFF0C 0xFF0D 0xFF1F 0xFF23 0xFF24 0xFF3C 0xFF3D 0xFF3E 0xFF3F
 	    0xFF41
+	    0x9428 0x9429 0x942A
 	    "
 
 __mmd_regnames="EEE_CAPABILITY EEE_ADV EEE_LP_ABILITY EEE_RSLVD MSE_A MSE_B MSE_C
@@ -233,6 +254,7 @@ __mmd_regnames="EEE_CAPABILITY EEE_ADV EEE_LP_ABILITY EEE_RSLVD MSE_A MSE_B MSE_
 		LED_PUL_STR_DUR
 		GE_SFT_RST GE_SFT_RST_CFG_EN GE_CLK_CFG GE_RGMII_CFG GE_RMII_CFG GE_LNK_STAT_INV_EN
 		GE_IO_GP_CLK_OR_CNTRL GE_IO_GP_OUT_OR_CNTRL GE_IO_INT_N_OR_CNTRL GE_IO_LED_A_OR_CNTRL
+		SOP_CTRL SOP_RX_DELAY SOP_TX_DELAY
 		"
 
 cmd="$1"
