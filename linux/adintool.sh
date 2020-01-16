@@ -125,13 +125,22 @@ check_arg_non_empty() {
 	}
 }
 
+__get_phy_addr() {
+	local eth="$1"
+
+	ethtool $eth 2>/dev/null | grep PHYAD | cut -d: -f2 | xargs
+}
+
 phy_read_mmd() {
 	local eth="$1"
 	local mmd_reg="$2"
 	check_eth_device_or_exit "$eth"
 	check_arg_non_empty "$mmd_reg"
-	phytool write $eth/0/0x10 $mmd_reg
-	phytool read $eth/0/0x11
+
+	local phyaddr=$(__get_phy_addr $eth)
+	
+	phytool write $eth/$phyaddr/0x10 $mmd_reg
+	phytool read $eth/$phyaddr/0x11
 }
 
 phy_write_mmd() {
@@ -141,8 +150,11 @@ phy_write_mmd() {
 	check_eth_device_or_exit "$eth"
 	check_arg_non_empty "$mmd_reg"
 	check_arg_non_empty "$new"
-	phytool write $eth/0/0x10 $mmd_reg
-	phytool write $eth/0/0x11 $new
+
+	local phyaddr=$(__get_phy_addr "$eth")
+
+	phytool write $eth/$phyaddr/0x10 $mmd_reg
+	phytool write $eth/$phyaddr/0x11 $new
 }
 
 dump_regs() {
@@ -153,7 +165,8 @@ dump_regs() {
 	local idx=0
 	echo "PHY core regs:"
 	for reg in $__phy_regs ; do
-		local val="$(phytool read $eth/0/$reg)"
+		local phyaddr=$(__get_phy_addr "$eth")
+		local val="$(phytool read $eth/$phyaddr/$reg)"
 		local name="$(get_item_from_list $idx $__phy_regnames)"
 		echo "$reg = $val - $name"
 		idx=$((idx + 1))
@@ -174,11 +187,13 @@ cable_diagnostics() {
 
 	check_eth_device_or_exit "$eth"
 
+	local phyaddr=$(__get_phy_addr "$eth")
+
 	# Disable linking in PhyCtrl3
-	phytool write $eth/0/0x0017 0x2048
+	phytool write $eth/$phyaddr/0x0017 0x2048
 
 	# Enable ClkDiag
-	phytool write $eth/0/0x0012 0x0406
+	phytool write $eth/$phyaddr/0x0012 0x0406
 
 	# Run diagnostics
 	phy_write_mmd $eth 0xBA1B 0x0001
@@ -195,10 +210,10 @@ cable_diagnostics() {
 	done
 
 	# Disable ClkDiag
-	phytool write $eth/0/0x0012 0x0402
+	phytool write $eth/$phyaddr/0x0012 0x0402
 
 	# Re-enable linking in PhyCtrl3
-	phytool write $eth/0/0x0017 0x3048
+	phytool write $eth/$phyaddr/0x0017 0x3048
 }
 
 sop() {
