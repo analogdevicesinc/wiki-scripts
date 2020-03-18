@@ -61,7 +61,9 @@ export KCFLAGS
 # We won't do any `git pull` to update the tree, users can choose to do that manually
 [ -d "$LINUX_DIR" ] || {
 	git clone https://github.com/analogdevicesinc/linux.git "$LINUX_DIR"
+	pushd $LINUX_DIR
 	git checkout rpi-4.19.y
+	popd 1> /dev/null
 }
 
 export ARCH
