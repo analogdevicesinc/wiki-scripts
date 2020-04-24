@@ -24,7 +24,6 @@ DEFCONFIG=${DEFCONFIG:-zynq_xcomm_adv7511_defconfig}
 GCC_ARCH=arm-linux-gnueabihf
 IMG_NAME="uImage"
 ARCH=arm
-DTDEFAULT=zynq-zc702-adv7511-ad9361-fmcomms2-3.dtb
 
 [ -n "$NUM_JOBS" ] || NUM_JOBS=5
 
