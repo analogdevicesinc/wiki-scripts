@@ -82,7 +82,6 @@ int main(int argc, char **argv)
 	struct iio_context *ctx[MAX_NUM_DEVICES];
 	int num, done, index, opt, ret, name = -1, uri = -1;
 	char strval[80];
-	long long err;
 	bool paused;
 
 	while ((opt = getopt(argc, argv, "d:u:")) != -1) {
@@ -160,7 +159,7 @@ int main(int argc, char **argv)
 			case PAUSED:
 				break;
 			default:
-				goto out;
+				goto err_destroy_context;
 			}
 		}
 
@@ -175,22 +174,20 @@ int main(int argc, char **argv)
 				printf("--- RESUME DEVICE%d ---\n", index);
 				iio_device_attr_write_bool(dev[index], "jesd204_fsm_resume", 1);
 			}
-			if (ret < 0)
-				err = ret;
 		}
 
 		printf("---------------------------------------------------------------------------\n");
 
-	} while (err == 0);
+	} while (ret >= 0);
 
-out:
-	for (index = 0; index < num; index++)
-		iio_context_destroy(ctx[index]);
-
-	exit(EXIT_SUCCESS);
 err_destroy_context:
 	for (index = 0; index < num; index++)
 		iio_context_destroy(ctx[index]);
 
 	exit(EXIT_FAILURE);
+out:
+	for (index = 0; index < num; index++)
+		iio_context_destroy(ctx[index]);
+
+	exit(EXIT_SUCCESS);
 }
