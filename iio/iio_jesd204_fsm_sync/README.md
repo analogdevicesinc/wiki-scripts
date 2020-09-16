@@ -5,7 +5,9 @@ It’s intended to sync multiple FPGA systems across jesd204-fsm topologies.
 There is always one primary device, the device which controls the sysref-provider and an open list of
 secondary devices which are synced by the same sysref-provider connected clock source. 
 
+```
 Usage: iio_jesd204_fsm_sync -d <primary-device> -u <primary-uri> <secondary uris> ...
+```
 
 ```
 Example:
