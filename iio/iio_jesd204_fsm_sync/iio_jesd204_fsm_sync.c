@@ -81,12 +81,19 @@ int main(int argc, char **argv)
 	struct iio_device *dev[MAX_NUM_DEVICES];
 	struct iio_context *ctx[MAX_NUM_DEVICES];
 	int num, done, index, opt, ret, name = -1, uri = -1;
+	int stop = 0, check = 0;
 	char strval[80];
-	bool paused;
+	bool paused, started;
 
-	while ((opt = getopt(argc, argv, "d:u:")) != -1) {
+	while ((opt = getopt(argc, argv, "d:u:pc")) != -1) {
 
 		switch (opt) {
+		case 'c':
+			check++;
+			break;
+		case 'p':
+			stop++;
+			break;
 		case 'd':
 			name = optind - 1;
 			break;
@@ -95,7 +102,7 @@ int main(int argc, char **argv)
 			break;
 		default: /* '?' */
 			fprintf(stderr,
-				"Usage: %s -d <primary-device> -u <primary-uri> <secondary uris> ...\n",
+				"Usage: %s [-p] [-c] -d <primary-device> -u <primary-uri> <secondary uris> ...\n",
 				argv[0]);
 			exit(EXIT_FAILURE);
 		}
@@ -142,9 +149,26 @@ int main(int argc, char **argv)
 
 	printf("---------------------------------------------------------------------------\n");
 
-	if (strcmp(argv[name], "adrv9009-phy") == 0)
-		for (index = 0; index < num; index++)
-			iio_device_debug_attr_write(dev[index], "initialize", "1");
+	if (check) {
+		int s_cnt = 0;
+		for (index = 0; index < num; index++) {
+			iio_device_attr_read_bool(dev[index], "jesd204_fsm_ctrl", &started);
+			if (ret < 0)
+				goto err_destroy_context;
+			if (started)
+				s_cnt++;
+		}
+
+		printf("%s\n", s_cnt == num ? "Running" :  "Stopped");
+
+		goto out;
+	}
+
+	for (index = 0; index < num; index++)
+		iio_device_attr_write_bool(dev[index], "jesd204_fsm_ctrl", !stop);
+
+	if (stop)
+		goto out;
 
 	do {
 		for (index = 0, done = 0; index < num; index++) {
@@ -190,4 +214,5 @@ out:
 		iio_context_destroy(ctx[index]);
 
 	exit(EXIT_SUCCESS);
+
 }
