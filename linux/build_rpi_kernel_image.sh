@@ -4,6 +4,7 @@ set -e
 LINUX_DIR="${1:-linux-adi}"
 DTFILE="$2"
 CROSS_COMPILE="$3"
+BRANCH="${4:-rpi-5.4.y}"
 
 HOST=${HOST:-x86_64}
 
@@ -62,7 +63,7 @@ export KCFLAGS
 [ -d "$LINUX_DIR" ] || {
 	git clone https://github.com/analogdevicesinc/linux.git "$LINUX_DIR"
 	pushd $LINUX_DIR
-	git checkout rpi-4.19.y
+	git checkout "$BRANCH"
 	popd 1> /dev/null
 }
 
