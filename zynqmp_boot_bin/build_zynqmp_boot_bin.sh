@@ -57,6 +57,9 @@ if [ -z "$tool_version" ] ; then
 fi
 atf_version=xilinx-$tool_version
 
+if [[ "$atf_version" == "xilinx-v2021.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1";fi
+if [[ "$atf_version" == "xilinx-v2021.1.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1_update1";fi
+
 ### Check if ATF_FILE is .elf or path to arm-trusted-firmware
 if [ "$ATF_FILE" != "" ] && [ -d $ATF_FILE ]; then
 ### Build arm-trusted-firmware bl31.elf
