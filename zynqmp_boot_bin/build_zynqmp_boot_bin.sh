@@ -60,6 +60,8 @@ atf_version=xilinx-$tool_version
 if [[ "$atf_version" == "xilinx-v2021.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1";fi
 if [[ "$atf_version" == "xilinx-v2021.1.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1_update1";fi
 
+if [[ "$4" == "uart1" ]];then console="cadence1";else console="cadence0";fi
+
 ### Check if ATF_FILE is .elf or path to arm-trusted-firmware
 if [ "$ATF_FILE" != "" ] && [ -d $ATF_FILE ]; then
 ### Build arm-trusted-firmware bl31.elf
@@ -67,7 +69,7 @@ if [ "$ATF_FILE" != "" ] && [ -d $ATF_FILE ]; then
 	cd $ATF_FILE
 	make distclean
 	git checkout $atf_version
-	make CROSS_COMPILE=aarch64-linux-gnu- PLAT=zynqmp RESET_TO_BL31=1
+	make CROSS_COMPILE=aarch64-linux-gnu- PLAT=zynqmp RESET_TO_BL31=1 ZYNQMP_CONSOLE=$console
 )
 	cp $ATF_FILE/build/zynqmp/release/bl31/bl31.elf $OUTPUT_DIR/bl31.elf
 elif [ "$ATF_FILE" == "download" ]; then
@@ -77,7 +79,7 @@ elif [ "$ATF_FILE" == "download" ]; then
 	git clone https://github.com/Xilinx/arm-trusted-firmware.git
 	cd arm-trusted-firmware
 	git checkout $atf_version
-	make CROSS_COMPILE=aarch64-linux-gnu- PLAT=zynqmp RESET_TO_BL31=1
+	make CROSS_COMPILE=aarch64-linux-gnu- PLAT=zynqmp RESET_TO_BL31=1 ZYNQMP_CONSOLE=$console
 )
 	cp $BUILD_DIR/arm-trusted-firmware/build/zynqmp/release/bl31/bl31.elf $OUTPUT_DIR/bl31.elf
 else
@@ -169,7 +171,11 @@ cp "$PMUFW_PATH" "$OUTPUT_DIR/pmufw.elf"
 	bootgen -arch zynqmp -image zynq.bif -o BOOT.BIN -w
 )
 
-### Optionally tar.gz the entire output folder with the name given in argument 3
-if [ ${#4} -ne 0 ]; then
-	tar czvf $4.tar.gz $OUTPUT_DIR
+### Optionally tar.gz the entire output folder with the name given in argument 4/5
+if [[ ( $4 == "uart"* && ${#5} -ne 0 ) ]]; then
+	tar czvf $5.tar.gz $OUTPUT_DIR
+fi
+
+if [[ ( ${#4} -ne 0 && $4 != "uart"* && ${#5} -eq 0 ) ]]; then
+        tar czvf $4.tar.gz $OUTPUT_DIR
 fi
