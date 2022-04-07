@@ -15,7 +15,7 @@ then
 fi
 if [ ! command -v quartus_cpf &> /dev/null ]
 then
-  echo "Error: Directory intelFPGA/18.1 not added to PATH!"
+  echo "Error: Location of quartus_cpf not added to the PATH environment variable!"
   exit 1
 fi
 
