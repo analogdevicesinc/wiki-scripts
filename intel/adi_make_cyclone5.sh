@@ -42,7 +42,7 @@ if [ -d "u-boot-socfpga" ]
 then
   cd ./u-boot-socfpga
   git fetch
-  git checkout -f "socfpga_v2020.10" 2>/dev/null
+  git checkout -f "rel_socfpga_v2020.10_21.10.01_pr" 2>/dev/null
   cd ..
 else
   git clone https://github.com/altera-opensource/u-boot-socfpga.git || continue
