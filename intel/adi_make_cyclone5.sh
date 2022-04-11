@@ -23,7 +23,6 @@ echo "Build the FPGA's Raw Binary File..."
 if [ -d "hdl" ]
 then
   cd ./hdl
-  git checkout -f "origin/master"
   git fetch
   git checkout -f "origin/master" 2>/dev/null
   cd ..
@@ -42,7 +41,6 @@ cd software/bootloader
 if [ -d "u-boot-socfpga" ]
 then
   cd ./u-boot-socfpga
-  git checkout -f "socfpga_v2020.10"
   git fetch
   git checkout -f "socfpga_v2020.10" 2>/dev/null
   cd ..
