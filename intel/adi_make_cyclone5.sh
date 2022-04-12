@@ -59,6 +59,8 @@ cd u-boot-socfpga
 ./arch/arm/mach-socfpga/qts-filter.sh cyclone5 ../../../ ../ ./board/altera/cyclone5-socdk/qts/
 
 echo "Configure and build U-Boot..."
+export ARCH=arm
+export CROSS_COMPILE=arm-none-linux-gnueabihf-
 make socfpga_cyclone5_defconfig
 make -j 4
 
