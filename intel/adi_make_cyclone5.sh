@@ -27,7 +27,7 @@ then
   git checkout -f "origin/master" 2>/dev/null
   cd ..
 else
-  git clone https://github.com/analogdevicesinc/hdl.git || continue
+  git clone https://github.com/analogdevicesinc/hdl.git
 fi
 
 cd "hdl/projects/$PROJECT/$CARRIER_BOARD"
@@ -45,7 +45,7 @@ then
   git checkout -f "rel_socfpga_v2020.10_21.10.01_pr" 2>/dev/null
   cd ..
 else
-  git clone https://github.com/altera-opensource/u-boot-socfpga.git || continue
+  git clone https://github.com/altera-opensource/u-boot-socfpga.git
 fi
 
 echo "Run the qts_filter..."
