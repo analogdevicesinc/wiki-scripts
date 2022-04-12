@@ -28,6 +28,9 @@ then
   cd ..
 else
   git clone https://github.com/analogdevicesinc/hdl.git
+  cd ./hdl
+  git checkout "origin/master"
+  cd ..
 fi
 
 cd "hdl/projects/$PROJECT/$CARRIER_BOARD"
@@ -46,6 +49,9 @@ then
   cd ..
 else
   git clone https://github.com/altera-opensource/u-boot-socfpga.git
+  cd ./u-boot-socfpga
+  git checkout "rel_socfpga_v2020.10_21.10.01_pr"
+  cd ..
 fi
 
 echo "Run the qts_filter..."
