@@ -49,6 +49,7 @@ mkdir -p $BUILD_DIR
 # 2018.3 use 08560c36ea5b6f48b962cb4bd9a79b35bb3d95ce
 # 2019.3 use 713dace94b259845fd8eede11061fbd8f039011e
 # 2020.1 use bf72e4d494f3be10665b94c0e88766eb2096ef71
+# 2021.2 use 799131a3b063f6f24f87baa74e46906c076aebcd
 
 tool_version=$($TOOL -version | sed -n '3p' | cut -d' ' -f 3)
 if [ -z "$tool_version" ] ; then
@@ -59,6 +60,7 @@ atf_version=xilinx-$tool_version
 
 if [[ "$atf_version" == "xilinx-v2021.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1";fi
 if [[ "$atf_version" == "xilinx-v2021.1.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1_update1";fi
+if [[ "$atf_version" == "xilinx-v2021.2" ]];then atf_version="xlnx-v2021.2";fi
 
 if [[ "$4" == "uart1" ]];then console="cadence1";else console="cadence0";fi
 
@@ -129,7 +131,7 @@ if [[ "$HDF_FILE" =~ ".hdf" ]];then
         SYSTEM_TOP_BIT_PATH="$BUILD_DIR/build/sdk/hw_0/system_top.bit"
 	PMUFW_PATH="$BUILD_DIR/pmufw/executable.elf"
 else
-	# Flow got changed starting with 2019.2 version (when Vitis replaced SDK) and pmufw is generated automatically with fsbl 
+	# Flow got changed starting with 2019.2 version (when Vitis replaced SDK) and pmufw is generated automatically with fsbl
         echo 'platform create -name hw0 -hw system_top.xsa -os standalone -out ./build/sdk -proc $cpu_name' >> $BUILD_DIR/create_fsbl_project.tcl
         echo 'platform generate' >> $BUILD_DIR/create_fsbl_project.tcl
 
