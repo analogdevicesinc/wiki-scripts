@@ -50,6 +50,7 @@ mkdir -p $BUILD_DIR
 # 2019.3 use 713dace94b259845fd8eede11061fbd8f039011e
 # 2020.1 use bf72e4d494f3be10665b94c0e88766eb2096ef71
 # 2021.2 use 799131a3b063f6f24f87baa74e46906c076aebcd
+# 2022.2 use 5ebf70ea38e4626637568352b644acbffe3b13c1
 
 tool_version=$($TOOL -version | sed -n '3p' | cut -d' ' -f 3)
 if [ -z "$tool_version" ] ; then
@@ -60,7 +61,8 @@ atf_version=xilinx-$tool_version
 
 if [[ "$atf_version" == "xilinx-v2021.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1";fi
 if [[ "$atf_version" == "xilinx-v2021.1.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1_update1";fi
-if [[ "$atf_version" == "xilinx-v2021.2" ]];then atf_version="xlnx-v2021.2";fi
+if [[ "$atf_version" == "xilinx-v2021.2" ]];then atf_version="xilinx-v2021.2";fi
+if [[ "$atf_version" == "xilinx-v2022.2" ]];then atf_version="xilinx-v2022.2";fi
 
 if [[ "$4" == "uart1" ]];then console="cadence1";else console="cadence0";fi
 
