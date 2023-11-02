@@ -3,7 +3,19 @@
 PROJECT="$1"
 CARRIER="$2"
 
-export CROSS_COMPILE=aarch64-none-linux-gnu-
+if [ -d "tools" ]
+then
+	cd tools
+else
+	mkdir tools
+	cd tools
+	wget https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu-a/10.3-2021.07/binrel/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu.tar.xz
+	tar xvf gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu.tar.xz
+fi
+
+export CROSS_COMPILE=$PWD/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-
+export ARCH=arm64
+cd ..
 
 if [ -d "arm-trusted-firmware" ]
 then
@@ -44,11 +56,11 @@ if [ -d "hdl" ]
 then
 	cd ./hdl
 	git fetch
-	git checkout -f origin/master
+	git checkout -f origin/main
 else
 	git clone https://github.com/analogdevicesinc/hdl.git
 	cd ./hdl
-	git checkout origin/master
+	git checkout origin/main
 fi
 
 cd "projects/$PROJECT/$CARRIER"
