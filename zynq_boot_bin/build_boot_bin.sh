@@ -1,28 +1,28 @@
 #!/bin/bash
 set -ex
 
-HDF_FILE=$1
+XSA_FILE=$1
 UBOOT_FILE=$2
 BUILD_DIR=build_boot_bin
 OUTPUT_DIR=output_boot_bin
 
 usage () {
-	echo "usage: $0 system_top.<hdf/xsa> u-boot.elf [output-archive]"
+	echo "usage: $0 system_top.xsa u-boot.elf [output-archive]"
 	exit 1
 }
 
 depends () {
 	echo Xilinx $1 must be installed and in your PATH
-	echo try: source /opt/Xilinx/Vivado/201x.x/settings64.sh
+	echo try: source /opt/Xilinx/Vivado/202x.x/settings64.sh
 	exit 1
 }
 
 ### Check command line parameters
-echo $HDF_FILE | grep -q ".hdf\|.xsa" || usage
+echo $XSA_FILE | grep -q ".xsa" || usage
 echo $UBOOT_FILE | grep -q -e ".elf" -e "uboot" -e "u-boot"|| usage
 
-if [ ! -f $HDF_FILE ]; then
-	echo $HDF_FILE: File not found!
+if [ ! -f $XSA_FILE ]; then
+	echo $XSA_FILE: File not found!
 	usage
 fi
 
@@ -39,30 +39,18 @@ rm -Rf $BUILD_DIR $OUTPUT_DIR
 mkdir -p $OUTPUT_DIR
 mkdir -p $BUILD_DIR
 
-cp $HDF_FILE $BUILD_DIR/
+cp $XSA_FILE $BUILD_DIR/
 cp $UBOOT_FILE $OUTPUT_DIR/u-boot.elf
-cp $HDF_FILE $OUTPUT_DIR/
+cp $XSA_FILE $OUTPUT_DIR/
 
 ### Create create_fsbl_project.tcl file used by xsct to create the fsbl.
-echo "hsi open_hw_design `basename $HDF_FILE`" > $BUILD_DIR/create_fsbl_project.tcl
+echo "hsi open_hw_design `basename $XSA_FILE`" > $BUILD_DIR/create_fsbl_project.tcl
 echo 'set cpu_name [lindex [hsi get_cells -filter {IP_TYPE==PROCESSOR}] 0]' >> $BUILD_DIR/create_fsbl_project.tcl
-### The fsbl creating flow is different starting with 2019.2 Xilinx version
-if [[ "$HDF_FILE" =~ ".hdf" ]];then
-	echo 'sdk setws ./build/sdk' >> $BUILD_DIR/create_fsbl_project.tcl
-	echo "sdk createhw -name hw_0 -hwspec `basename $HDF_FILE`" >> $BUILD_DIR/create_fsbl_project.tcl
-	echo 'sdk createapp -name fsbl -hwproject hw_0 -proc $cpu_name -os standalone -lang C -app {Zynq FSBL}' >> $BUILD_DIR/create_fsbl_project.tcl
-	echo 'configapp -app fsbl build-config release' >> $BUILD_DIR/create_fsbl_project.tcl
-	echo 'sdk projects -build -type all' >> $BUILD_DIR/create_fsbl_project.tcl
+echo 'platform create -name hw0 -hw system_top.xsa -os standalone -out ./build/sdk -proc $cpu_name' >> $BUILD_DIR/create_fsbl_project.tcl
+echo 'platform generate' >> $BUILD_DIR/create_fsbl_project.tcl
 
-	FSBL_PATH="$BUILD_DIR/build/sdk/fsbl/Release/fsbl.elf"
-	SYSTEM_TOP_BIT_PATH="$BUILD_DIR/build/sdk/hw_0/system_top.bit"
-else
-	echo 'platform create -name hw0 -hw system_top.xsa -os standalone -out ./build/sdk -proc $cpu_name' >> $BUILD_DIR/create_fsbl_project.tcl
-	echo 'platform generate' >> $BUILD_DIR/create_fsbl_project.tcl
-
-	FSBL_PATH="$BUILD_DIR/build/sdk/hw0/export/hw0/sw/hw0/boot/fsbl.elf"
-	SYSTEM_TOP_BIT_PATH="$BUILD_DIR/build/sdk/hw0/hw/system_top.bit"
-fi
+FSBL_PATH="$BUILD_DIR/build/sdk/hw0/export/hw0/sw/hw0/boot/fsbl.elf"
+SYSTEM_TOP_BIT_PATH="$BUILD_DIR/build/sdk/hw0/hw/system_top.bit"
 
 ### Create zynq.bif file used by bootgen
 echo 'the_ROM_image:' > $OUTPUT_DIR/zynq.bif
