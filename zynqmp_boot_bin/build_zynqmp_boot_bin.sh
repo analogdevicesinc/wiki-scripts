@@ -46,9 +46,9 @@ mkdir -p $BUILD_DIR
 # 2023.1 use c7385e021c0b95a025f2c78384d57224e0120401
 # 2023.2 use 04013814718e870261f27256216cd7da3eda6a5d
 
-tool_version=$(vitis -version | sed -n '3p' | cut -d' ' -f 3)
-if [ -z "$tool_version" ] ; then
-	echo "Could not determine Vivado version"
+tool_version=$(vitis -v | grep -o "Vitis v20[1-9][0-9]\.[0-9] (64-bit)" | grep -o "v20[1-9][0-9]\.[0-9]")
+if [[ "$tool_version" != "v20"[1-9][0-9]"."[0-9] ]] ; then
+	echo "Could not determine Vitis version"
 	exit 1
 fi
 atf_version=xilinx-$tool_version
