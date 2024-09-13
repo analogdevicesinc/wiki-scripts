@@ -19,20 +19,37 @@ then
   exit 1
 fi
 
+if [ -d "tools" ]
+then
+  cd tools
+else
+  mkdir tools
+  cd tools
+  wget 'https://developer.arm.com/-/media/Files/downloads/gnu/13.2.rel1/binrel/arm-gnu-toolchain-13.2.rel1-x86_64-arm-none-linux-gnueabihf.tar.xz'
+  tar xf arm-gnu-toolchain-13.2.rel1-x86_64-arm-none-linux-gnueabihf.tar.xz 
+  #wget https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu-a/10.3-2021.07/binrel/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu.tar.xz
+  #tar xvf gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu.tar.xz
+fi
+
+export CROSS_COMPILE=$PWD/arm-gnu-toolchain-13.2.Rel1-x86_64-arm-none-linux-gnueabihf/bin/arm-none-linux-gnueabihf-
+export ARCH=arm
+cd ..
+
 echo "Build the FPGA's Raw Binary File..."
 if [ -d "hdl" ]
 then
   cd ./hdl
-  git checkout -f "origin/master"
+ # git checkout -f "origin/master"
   git fetch
-  git checkout -f "origin/master" 2>/dev/null
+  git pull
+#  git checkout -f "origin/master" 2>/dev/null
   cd ..
 else
   git clone https://github.com/analogdevicesinc/hdl.git || continue
 fi
 
 cd "hdl/projects/$PROJECT/$CARRIER_BOARD"
-make
+make -j 8
 quartus_cpf -c -o bitstream_compression=on "./$PROJECT""_""$CARRIER_BOARD.sof" soc_system.rbf
 
 echo "Build U-Boot..."
@@ -52,11 +69,8 @@ fi
 
 echo "Run the qts_filter..."
 cd u-boot-socfpga
+git checkout socfpga_v2021.10
 ./arch/arm/mach-socfpga/qts-filter.sh cyclone5 ../../../ ../ ./board/altera/cyclone5-socdk/qts/
-
-echo "Configure and build U-Boot..."
-make socfpga_cyclone5_defconfig
-make -j 4
 
 echo "Make extlinux.conf linux configuration file..."
 mkdir -p extlinux
@@ -64,6 +78,10 @@ echo "LABEL Linux Cyclone V Default" > extlinux/extlinux.conf
 echo "    KERNEL ../zImage" >> extlinux/extlinux.conf
 echo "    FDT ../socfpga.dtb" >> extlinux/extlinux.conf
 echo "    APPEND root=/dev/mmcblk0p2 rw rootwait earlyprintk console=ttyS0,115200n8" >> extlinux/extlinux.conf
+
+echo "Configure and build U-Boot..."
+make socfpga_cyclone5_defconfig
+make -j 4
 
 echo "Make u-boot.scr file..."
 echo "load mmc 0:1 \${loadaddr} soc_system.rbf;" > u-boot.txt
