@@ -1,11 +1,10 @@
 ﻿$XSA_FILE=$args[0]
-$UBOOT_FILE=$args[1]
-$OUT_FILE=$args[2]
+$OUT_FILE=$args[1]
 $BUILD_DIR='build_boot_bin'
 $OUTPUT_DIR='output_boot_bin'
 
 function usage () {
-	echo "usage:powershell.exe .\build_boot_bin.ps1 system_top.xsa u-boot.elf [output-archive]"
+	echo "usage:powershell.exe .\build_boot_bin.ps1 system_top.xsa [output-archive]"
 	exit 1
 }
 
@@ -28,9 +27,35 @@ if (!(Test-Path $XSA_FILE)) {
     usage
 }
 
-if (!(Test-Path $UBOOT_FILE)) {
-    echo "$UBOOT_FILE not found"
-    usage
+$patterns = @("zed", "ccfmc_.*", "ccbob_.*", "usrpe31x", "zc702", "zc706", "coraz7s")
+$regex = $patterns -join '|'
+$fullPath = (Get-Item $XSA_FILE).FullName
+$dir = Split-Path $fullPath
+$newName = (Get-Item $XSA_FILE).BaseName + ".zip"
+$renamedFilePath = Join-Path $dir $newName
+$extractLocation = Join-Path $dir "extractedXSA"
+Copy-Item $XSA_FILE $renamedFilePath
+Expand-Archive -Path $renamedFilePath -DestinationPath $extractLocation -Force
+
+# Search inside extracted files
+$line = Get-ChildItem -Path $extractLocation\*.hwh -Recurse -File |
+    Get-Content |
+    Select-String -Pattern "PATH_TO_FILE" |
+	Select-Object -First 1 -ExpandProperty Line
+$carrier = [regex]::Match($line, $regex).Value	
+
+switch -Wildcard ($carrier) {
+    "zed"      { $UBOOT_FILE = "u-boot_zynq_zed.elf" }
+    "ccfmc_*"  { $UBOOT_FILE = "u-boot_zynq_adrv9361.elf" }
+    "ccbob_*"  { $UBOOT_FILE = "u-boot_zynq_adrv9361.elf" }
+    "usrpe31x" { $UBOOT_FILE = "u-boot-usrp-e310.elf" }
+    "zc702"    { $UBOOT_FILE = "u-boot_zynq_zc702.elf" }
+    "zc706"    { $UBOOT_FILE = "u-boot_zynq_zc706.elf" }
+    "coraz7s"  { $UBOOT_FILE = "u-boot_zynq_coraz7.elf" }
+    Default {
+        Write-Host "`n`n!!!!! Undefined carrier name for uboot selection !!!!!`n`n"
+        exit 126
+    }
 }
 
 if (!(Get-Command xsct)) {
@@ -40,6 +65,19 @@ if (!(Get-Command xsct)) {
 if (!(Get-Command bootgen)) {
     depends "bootgen"
 }
+
+$tool_version = (& vitis -v | Select-String -Pattern "Vitis v20[1-9][0-9]\.[0-9] \(64-bit\)" | 
+                 ForEach-Object { ($_ -match "20[1-9][0-9]\.[0-9]") ; $Matches[0] })
+
+if (-not ($tool_version -match "^20[1-9][0-9]\.[0-9]$")) {
+    Write-Host "Could not determine Vitis version"
+    exit 1
+}
+
+$boot_partition_location = $tool_version -replace "\.", "_r"
+
+Write-Host "Downloading $UBOOT_FILE ..."
+Invoke-WebRequest -Uri "https://swdownloads.analog.com/cse/boot_partition_files/$boot_partition_location/$UBOOT_FILE" -OutFile $UBOOT_FILE
 
 Remove-Item -Recurse -Force -ErrorAction:SilentlyContinue $BUILD_DIR
 Remove-Item -Recurse -Force -ErrorAction:SilentlyContinue $OUTPUT_DIR

@@ -2,8 +2,7 @@
 set -ex
 
 XSA_FILE=$1
-UBOOT_FILE=$2
-ATF_FILE=${3:-download}
+ATF_FILE=${2:-download}
 BUILD_DIR=build_boot_bin
 OUTPUT_DIR=output_boot_bin
 
@@ -20,16 +19,11 @@ depends () {
 
 ### Check command line parameters
 echo $XSA_FILE | grep -q ".xsa" || usage
-echo $UBOOT_FILE | grep -q -e ".elf" -e "uboot" -e "u-boot" || usage
+
 
 if [ ! -f $XSA_FILE ]; then
 	echo $XSA_FILE: File not found!
 	usage
-fi
-
-if [ ! -f $UBOOT_FILE ]; then
-    echo $UBOOT_FILE: File not found!
-    usage
 fi
 
 ### Check for required Xilinx tools (starting with 2019.2 there is no hsi anymore)
@@ -51,6 +45,25 @@ if [[ "$tool_version" != "v20"[1-9][0-9]"."[0-9] ]] ; then
 	echo "Could not determine Vitis version"
 	exit 1
 fi
+
+patterns=("zcu102" "adrv2crr_*" "jupiter_sdr" "k26")
+
+carrier=$(unzip -p $XSA_FILE | grep -a "PATH_TO_FILE" | grep -oE "$(IFS='|'; echo "${patterns[*]}")")
+case  $carrier  in
+        zcu102)                    UBOOT_FILE="u-boot_xilinx_zynqmp_zcu102_revA.elf" ;;
+        adrv2crr_*)                UBOOT_FILE="u-boot_adi_zynqmp_adrv9009_zu11eg_adrv2crr_fmc.elf" ;;
+        jupiter_sdr)               UBOOT_FILE="u-boot_zynqmp-jupiter-sdr.elf" ;;
+        k26)                       UBOOT_FILE="u-boot_zynqmp-smk-k26-revA-wrapper.elf" ;;
+        *)
+                echo "\n\n!!!!! Undefined carrier name for uboot selection !!!!!\n\n"
+                exit 126
+esac
+
+echo "Downloading $UBOOT_FILE ..."
+boot_partition_location="${tool_version#v}"
+boot_partition_location="${boot_partition_location/./_r}"
+wget https://swdownloads.analog.com/cse/boot_partition_files/$boot_partition_location/$UBOOT_FILE
+
 atf_version=xilinx-$tool_version
 
 if [[ "$atf_version" == "xilinx-v2021.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1";fi
