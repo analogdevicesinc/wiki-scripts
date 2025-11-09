@@ -54,7 +54,7 @@ fi
 boot_partition_location=${tool_version//./_r}
 
 echo "Downloading $UBOOT_FILE ..."
-wget https://swdownloads.analog.com/cse/boot_partition_files/$boot_partition_location/$UBOOT_FILE
+wget https://swdownloads.analog.com/cse/boot_partition_files/uboot/$boot_partition_location/$UBOOT_FILE
 
 rm -Rf $BUILD_DIR $OUTPUT_DIR
 mkdir -p $OUTPUT_DIR
