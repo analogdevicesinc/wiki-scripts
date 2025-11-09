@@ -77,7 +77,7 @@ if (-not ($tool_version -match "^20[1-9][0-9]\.[0-9]$")) {
 $boot_partition_location = $tool_version -replace "\.", "_r"
 
 Write-Host "Downloading $UBOOT_FILE ..."
-Invoke-WebRequest -Uri "https://swdownloads.analog.com/cse/boot_partition_files/$boot_partition_location/$UBOOT_FILE" -OutFile $UBOOT_FILE
+Invoke-WebRequest -Uri "https://swdownloads.analog.com/cse/boot_partition_files/uboot/$boot_partition_location/$UBOOT_FILE" -OutFile $UBOOT_FILE
 
 Remove-Item -Recurse -Force -ErrorAction:SilentlyContinue $BUILD_DIR
 Remove-Item -Recurse -Force -ErrorAction:SilentlyContinue $OUTPUT_DIR

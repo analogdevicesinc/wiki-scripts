@@ -62,7 +62,7 @@ esac
 echo "Downloading $UBOOT_FILE ..."
 boot_partition_location="${tool_version#v}"
 boot_partition_location="${boot_partition_location/./_r}"
-wget https://swdownloads.analog.com/cse/boot_partition_files/$boot_partition_location/$UBOOT_FILE
+wget https://swdownloads.analog.com/cse/boot_partition_files/uboot/$boot_partition_location/$UBOOT_FILE
 
 atf_version=xilinx-$tool_version
 
