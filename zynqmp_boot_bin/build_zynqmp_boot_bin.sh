@@ -2,12 +2,13 @@
 set -ex
 
 XSA_FILE=$1
-ATF_FILE=${2:-download}
+UBOOT_FILE=${2:-download}
+ATF_FILE=${3:-download}
 BUILD_DIR=build_boot_bin
 OUTPUT_DIR=output_boot_bin
 
 usage () {
-	echo "usage: $0 system_top.xsa u-boot.elf  (download | bl31.elf | <path-to-arm-trusted-firmware-source>) [output-archive]"
+	echo "usage: $0 system_top.xsa (u-boot.elf | download)  (download | bl31.elf | <path-to-arm-trusted-firmware-source>) [output-archive]"
 	exit 1
 }
 
@@ -30,6 +31,32 @@ fi
 command -v xsct >/dev/null 2>&1 || depends xsct
 command -v bootgen >/dev/null 2>&1 || depends bootgen
 
+if [ "$UBOOT_FILE" == "download" ]; then
+	patterns=("zcu102" "adrv2crr_*" "jupiter_sdr" "k26")
+
+	carrier=$(unzip -p $XSA_FILE | grep -a "PATH_TO_FILE" | grep -oE "$(IFS='|'; echo "${patterns[*]}")")
+	case  $carrier  in
+        	zcu102)                    UBOOT_FILE="u-boot_xilinx_zynqmp_zcu102_revA.elf" ;;
+	        adrv2crr_*)                UBOOT_FILE="u-boot_adi_zynqmp_adrv9009_zu11eg_adrv2crr_fmc.elf" ;;
+	        jupiter_sdr)               UBOOT_FILE="u-boot_zynqmp-jupiter-sdr.elf" ;;
+        	k26)                       UBOOT_FILE="u-boot_zynqmp-smk-k26-revA-wrapper.elf" ;;
+	        *)
+	                echo "\n\n!!!!! Undefined carrier name for uboot selection !!!!!\n\n"
+        	        exit 1
+	esac
+
+	echo "Downloading $UBOOT_FILE ..."
+	boot_partition_location="${tool_version#v}"
+	boot_partition_location="${boot_partition_location/./_r}"
+	wget https://swdownloads.analog.com/cse/boot_partition_files/uboot/$boot_partition_location/$UBOOT_FILE
+else
+	echo $UBOOT_FILE | grep -q -e ".elf" -e "uboot" -e "u-boot"|| usage
+	if [ ! -f $UBOOT_FILE ]; then
+		echo $UBOOT_FILE: File not found!
+		usage
+	fi
+fi
+
 rm -Rf $BUILD_DIR $OUTPUT_DIR
 mkdir -p $OUTPUT_DIR
 mkdir -p $BUILD_DIR
@@ -45,24 +72,6 @@ if [[ "$tool_version" != "v20"[1-9][0-9]"."[0-9] ]] ; then
 	echo "Could not determine Vitis version"
 	exit 1
 fi
-
-patterns=("zcu102" "adrv2crr_*" "jupiter_sdr" "k26")
-
-carrier=$(unzip -p $XSA_FILE | grep -a "PATH_TO_FILE" | grep -oE "$(IFS='|'; echo "${patterns[*]}")")
-case  $carrier  in
-        zcu102)                    UBOOT_FILE="u-boot_xilinx_zynqmp_zcu102_revA.elf" ;;
-        adrv2crr_*)                UBOOT_FILE="u-boot_adi_zynqmp_adrv9009_zu11eg_adrv2crr_fmc.elf" ;;
-        jupiter_sdr)               UBOOT_FILE="u-boot_zynqmp-jupiter-sdr.elf" ;;
-        k26)                       UBOOT_FILE="u-boot_zynqmp-smk-k26-revA-wrapper.elf" ;;
-        *)
-                echo "\n\n!!!!! Undefined carrier name for uboot selection !!!!!\n\n"
-                exit 126
-esac
-
-echo "Downloading $UBOOT_FILE ..."
-boot_partition_location="${tool_version#v}"
-boot_partition_location="${boot_partition_location/./_r}"
-wget https://swdownloads.analog.com/cse/boot_partition_files/uboot/$boot_partition_location/$UBOOT_FILE
 
 atf_version=xilinx-$tool_version
 
