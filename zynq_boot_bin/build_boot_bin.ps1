@@ -21,16 +21,27 @@ Param (
 
 ### Check command line parameters
 if ($null -eq (echo "$XSA_FILE" | Select-String -Pattern .xsa)) {usage}
-if ($null -eq (echo "$UBOOT_FILE" | Select-String -Pattern .elf | Select-String -Pattern u-boot)) {usage}
 
 if (!(Test-Path $XSA_FILE)) {
     echo "$XSA_FILE not found"
     usage
 }
 
+if (!(Get-Command xsct)) {
+    depends "xsct"
+}
+
+if (!(Get-Command bootgen)) {
+    depends "bootgen"
+}
+
 $tool_version = (& vitis -v | Select-String -Pattern "Vitis v20[1-9][0-9]\.[0-9] \(64-bit\)" | 
                  ForEach-Object { ($_ -match "20[1-9][0-9]\.[0-9]") ; $Matches[0] })
 
+if (-not ($tool_version -match "^20[1-9][0-9]\.[0-9]$")) {
+    Write-Host "Could not determine Vitis version"
+    exit 1
+}
 
 if ($UBOOT_FILE -eq "download") {
 	$patterns = @("zed", "ccfmc_.*", "ccbob_.*", "usrpe31x", "zc702", "zc706", "coraz7s")
@@ -58,7 +69,7 @@ if ($UBOOT_FILE -eq "download") {
 	    "zc706"    { $UBOOT_FILE = "u-boot_zynq_zc706.elf" }
 	    "coraz7s"  { $UBOOT_FILE = "u-boot_zynq_coraz7.elf" }
 	    Default {
-	        Write-Host "`n`n!!!!! Undefined carrier name for uboot selection !!!!!`n`n"
+	        Write-Host "`n`n!!!!! The specified carrier does not have a downloadable u-boot.elf file !!!!!`n`n"
 	        exit 1
 	    }
 	}
@@ -77,22 +88,9 @@ else {
         	usage
     	}
 	if (-not (Test-Path $UBOOT_FILE)) {
-        	Write-Host "$UBOOT_FILE: File not found!"
+        	Write-Host "$UBOOT_FILE File not found!"
         	usage
 	}
-}
-
-if (!(Get-Command xsct)) {
-    depends "xsct"
-}
-
-if (!(Get-Command bootgen)) {
-    depends "bootgen"
-}
-
-if (-not ($tool_version -match "^20[1-9][0-9]\.[0-9]$")) {
-    Write-Host "Could not determine Vitis version"
-    exit 1
 }
 
 Remove-Item -Recurse -Force -ErrorAction:SilentlyContinue $BUILD_DIR

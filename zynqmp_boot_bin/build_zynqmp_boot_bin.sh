@@ -30,6 +30,12 @@ fi
 command -v xsct >/dev/null 2>&1 || depends xsct
 command -v bootgen >/dev/null 2>&1 || depends bootgen
 
+tool_version=$(vitis -v | grep -o "Vitis v20[1-9][0-9]\.[0-9] (64-bit)" | grep -o "v20[1-9][0-9]\.[0-9]")
+if [[ "$tool_version" != "v20"[1-9][0-9]"."[0-9] ]] ; then
+	echo "Could not determine Vitis version"
+	exit 1
+fi
+
 if [ "$UBOOT_FILE" == "download" ]; then
 	patterns=("zcu102" "adrv2crr_*" "jupiter_sdr" "k26")
 
@@ -40,7 +46,7 @@ if [ "$UBOOT_FILE" == "download" ]; then
 	        jupiter_sdr)               UBOOT_FILE="u-boot_zynqmp-jupiter-sdr.elf" ;;
         	k26)                       UBOOT_FILE="u-boot_zynqmp-smk-k26-revA-wrapper.elf" ;;
 	        *)
-	                echo "\n\n!!!!! Undefined carrier name for uboot selection !!!!!\n\n"
+	                echo "\n\n!!!!! The specified carrier does not have a downloadable u-boot.elf file !!!!!\n\n"
         	        exit 1
 	esac
 
@@ -65,12 +71,6 @@ mkdir -p $BUILD_DIR
 # 2022.2 use 5ebf70ea38e4626637568352b644acbffe3b13c1
 # 2023.1 use c7385e021c0b95a025f2c78384d57224e0120401
 # 2023.2 use 04013814718e870261f27256216cd7da3eda6a5d
-
-tool_version=$(vitis -v | grep -o "Vitis v20[1-9][0-9]\.[0-9] (64-bit)" | grep -o "v20[1-9][0-9]\.[0-9]")
-if [[ "$tool_version" != "v20"[1-9][0-9]"."[0-9] ]] ; then
-	echo "Could not determine Vitis version"
-	exit 1
-fi
 
 atf_version=xilinx-$tool_version
 

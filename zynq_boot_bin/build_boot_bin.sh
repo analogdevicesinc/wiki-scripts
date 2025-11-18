@@ -29,6 +29,12 @@ fi
 command -v xsct >/dev/null 2>&1 || depends xsct
 command -v bootgen >/dev/null 2>&1 || depends bootgen
 
+tool_version=$(vitis -v | grep -o "Vitis v20[1-9][0-9]\.[0-9] (64-bit)" | grep -o "20[1-9][0-9]\.[0-9]")
+if [[ "$tool_version" != "20"[1-9][0-9]"."[0-9] ]] ; then
+	echo "Could not determine Vitis version"
+	exit 1
+fi
+
 if [ "$UBOOT_FILE" == "download" ]; then
 	patterns=("zed" "ccfmc_*" "ccbob_*" "usrpe31x" "zc702" "zc706" "coraz7s")
 
@@ -41,7 +47,7 @@ if [ "$UBOOT_FILE" == "download" ]; then
 		zc706)			UBOOT_FILE="u-boot_zynq_zc706.elf" ;;
 		coraz7s)		UBOOT_FILE="u-boot_zynq_coraz7.elf" ;;
 		*)
-			echo "\n\n!!!!! Undefined carrier name for uboot selection !!!!!\n\n"
+			echo "\n\n!!!!! The specified carrier does not have a downloadable u-boot.elf file !!!!!\n\n"
 			exit 1
 	esac
 	
@@ -56,12 +62,6 @@ else
 		usage
 	fi
 
-fi
-
-tool_version=$(vitis -v | grep -o "Vitis v20[1-9][0-9]\.[0-9] (64-bit)" | grep -o "20[1-9][0-9]\.[0-9]")
-if [[ "$tool_version" != "20"[1-9][0-9]"."[0-9] ]] ; then
-	echo "Could not determine Vitis version"
-	exit 1
 fi
 
 rm -Rf $BUILD_DIR $OUTPUT_DIR
