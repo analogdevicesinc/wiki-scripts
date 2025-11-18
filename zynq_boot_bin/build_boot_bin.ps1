@@ -52,8 +52,7 @@ if ($UBOOT_FILE -eq "download") {
 
 	switch -Wildcard ($carrier) {
 	    "zed"      { $UBOOT_FILE = "u-boot_zynq_zed.elf" }
-	    "ccfmc_*"  { $UBOOT_FILE = "u-boot_zynq_adrv9361.elf" }
-	    "ccbob_*"  { $UBOOT_FILE = "u-boot_zynq_adrv9361.elf" }
+	    { $_ -like "ccfmc_*" -or $_ -like "ccbob_*" }  { $UBOOT_FILE = "u-boot_zynq_adrv9361.elf" }
 	    "usrpe31x" { $UBOOT_FILE = "u-boot-usrp-e310.elf" }
 	    "zc702"    { $UBOOT_FILE = "u-boot_zynq_zc702.elf" }
 	    "zc706"    { $UBOOT_FILE = "u-boot_zynq_zc706.elf" }
@@ -67,6 +66,10 @@ if ($UBOOT_FILE -eq "download") {
 	$boot_partition_location = $tool_version -replace "\.", "_r"
 
 	Write-Host "Downloading $UBOOT_FILE ..."
+	# Remove existing file to ensure clean download
+	if (Test-Path $UBOOT_FILE) {
+		Remove-Item $UBOOT_FILE -Force
+	}
 	Invoke-WebRequest -Uri "https://swdownloads.analog.com/cse/boot_partition_files/uboot/$boot_partition_location/$UBOOT_FILE" -OutFile $UBOOT_FILE
 }
 else {

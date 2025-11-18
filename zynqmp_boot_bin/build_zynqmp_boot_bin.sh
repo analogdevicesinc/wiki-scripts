@@ -21,7 +21,6 @@ depends () {
 ### Check command line parameters
 echo $XSA_FILE | grep -q ".xsa" || usage
 
-
 if [ ! -f $XSA_FILE ]; then
 	echo $XSA_FILE: File not found!
 	usage
@@ -48,11 +47,11 @@ if [ "$UBOOT_FILE" == "download" ]; then
 	echo "Downloading $UBOOT_FILE ..."
 	boot_partition_location="${tool_version#v}"
 	boot_partition_location="${boot_partition_location/./_r}"
-	wget https://swdownloads.analog.com/cse/boot_partition_files/uboot/$boot_partition_location/$UBOOT_FILE
+	wget -O "$UBOOT_FILE" https://swdownloads.analog.com/cse/boot_partition_files/uboot/$boot_partition_location/$UBOOT_FILE
 else
 	echo $UBOOT_FILE | grep -q -e ".elf" -e "uboot" -e "u-boot"|| usage
 	if [ ! -f $UBOOT_FILE ]; then
-		echo $UBOOT_FILE: File not found!
+		echo "$UBOOT_FILE: File not found!"
 		usage
 	fi
 fi

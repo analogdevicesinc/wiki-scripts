@@ -35,8 +35,7 @@ if [ "$UBOOT_FILE" == "download" ]; then
 	carrier=$(unzip -p $XSA_FILE | grep -a "PATH_TO_FILE" | grep -oE "$(IFS='|'; echo "${patterns[*]}")")
 	case  $carrier  in
 		zed)			UBOOT_FILE="u-boot_zynq_zed.elf" ;;
-		ccfmc_*)		UBOOT_FILE="u-boot_zynq_adrv9361.elf" ;;
-		ccbob_*)		UBOOT_FILE="u-boot_zynq_adrv9361.elf" ;;
+		ccfmc_*|ccbob_*)	UBOOT_FILE="u-boot_zynq_adrv9361.elf" ;;
 		usrpe31x)		UBOOT_FILE="u-boot-usrp-e310.elf" ;;
 		zc702)			UBOOT_FILE="u-boot_zynq_zc702.elf" ;;
 		zc706)			UBOOT_FILE="u-boot_zynq_zc706.elf" ;;
@@ -49,7 +48,7 @@ if [ "$UBOOT_FILE" == "download" ]; then
 	boot_partition_location=${tool_version//./_r}
 
 	echo "Downloading $UBOOT_FILE ..."
-	wget https://swdownloads.analog.com/cse/boot_partition_files/uboot/$boot_partition_location/$UBOOT_FILE
+	wget -O "$UBOOT_FILE" https://swdownloads.analog.com/cse/boot_partition_files/uboot/$boot_partition_location/$UBOOT_FILE
 else
 	echo $UBOOT_FILE | grep -q -e ".elf" -e "uboot" -e "u-boot"|| usage
 	if [ ! -f $UBOOT_FILE ]; then
