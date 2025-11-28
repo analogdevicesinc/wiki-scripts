@@ -42,6 +42,17 @@ fi
 ### Check for required Xilinx tools (starting with 2019.2 there is no hsi anymore)
 command -v bootgen >/dev/null 2>&1 || depends bootgen
 
+tool_version=$(vivado -version | sed -n '1p' | cut -d' ' -f 2)
+if [ -z "$tool_version" ] ; then
+	echo "Could not determine Vivado version"
+	exit 1
+fi
+
+versal_download_tools_version=$tool_version
+if [[ "$tool_version" == *"2025"* ]]; then
+	versal_download_tools_version="v2024.2"
+fi
+
 rm -Rf $BUILD_DIR $OUTPUT_DIR
 mkdir -p $OUTPUT_DIR
 mkdir -p $BUILD_DIR
@@ -60,13 +71,7 @@ if [ "$UBOOT_FILE" != "" ] && [ -d $UBOOT_FILE ]; then
 )
 	cp $UBOOT_FILE/u-boot.elf $OUTPUT_DIR/u-boot.elf
 elif [ "$UBOOT_FILE" == "download" ]; then
-(
-	cd $BUILD_DIR
-	git clone https://github.com/Xilinx/u-boot-xlnx
-	cd u-boot-xlnx
-	build_u_boot
-)
-	cp $BUILD_DIR/u-boot-xlnx/u-boot.elf $OUTPUT_DIR/u-boot.elf
+	wget -O $OUTPUT_DIR/u-boot.elf https://github.com/Xilinx/soc-prebuilt-firmware/raw/refs/tags/xilinx_$versal_download_tools_version/$board-versal/u-boot.elf
 else
 	echo $UBOOT_FILE | grep -q -e ".elf" || usage
 	if [ ! -f $UBOOT_FILE ]; then
@@ -76,11 +81,6 @@ else
 	cp $UBOOT_FILE $OUTPUT_DIR/u-boot.elf
 fi
 
-tool_version=$(vivado -version | sed -n '1p' | cut -d' ' -f 2)
-if [ -z "$tool_version" ] ; then
-	echo "Could not determine Vivado version"
-	exit 1
-fi
 atf_version=xilinx-$tool_version
 if [[ "$atf_version" == "xilinx-v2021.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1";fi
 if [[ "$atf_version" == "xilinx-v2021.1.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1_update1";fi
@@ -94,13 +94,7 @@ if [ "$ATF_FILE" != "" ] && [ -d $ATF_FILE ]; then
 )
 	cp $ATF_FILE/build/versal/release/bl31/bl31.elf $OUTPUT_DIR/bl31.elf
 elif [ "$ATF_FILE" == "download" ]; then
-(
-	cd $BUILD_DIR
-	git clone https://github.com/Xilinx/arm-trusted-firmware.git
-	cd arm-trusted-firmware
-	build_bl31
-)
-	cp $BUILD_DIR/arm-trusted-firmware/build/versal/release/bl31/bl31.elf $OUTPUT_DIR/bl31.elf
+	wget -O $OUTPUT_DIR/bl31.elf https://github.com/Xilinx/soc-prebuilt-firmware/raw/refs/tags/xilinx_$versal_download_tools_version/$board-versal/bl31.elf
 else
 	echo $ATF_FILE | grep -q -e ".elf" || usage
 	if [ ! -f $ATF_FILE ]; then
