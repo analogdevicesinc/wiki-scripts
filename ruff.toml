@@ -1,0 +1,15 @@
+line-length = 120
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "B", "I"]  # pycodestyle, pyflakes, bugbear, import order
+ignore = [
+    "E501",  # ignore long lines (optional)
+    "B007",
+    "B904"
+]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
