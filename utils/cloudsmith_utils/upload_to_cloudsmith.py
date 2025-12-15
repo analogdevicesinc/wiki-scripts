@@ -125,6 +125,8 @@ for FILE in LOCAL_PATHS_LIST:
    upload_cmd = "cloudsmith push raw --republish "
    if TAGS:
       upload_cmd += f"--tags '{TAGS}' "
+   if CLOUDSMITH_API_KEY:
+      upload_cmd += f"--api-key '{CLOUDSMITH_API_KEY}' "
    upload_cmd += f"--version '{FILE_VERSION}' "
    upload_cmd += f"adi/{CLOUDSMITH_REPO} {FILE}"
    os.system(upload_cmd)
