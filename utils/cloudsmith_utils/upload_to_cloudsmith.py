@@ -122,7 +122,7 @@ for FILE in LOCAL_PATHS_LIST:
    else:
       FILE_VERSION = VERSION
    print('\n\n === Start uploading ' + str(FILE) + ' on adi/' + str(CLOUDSMITH_REPO) + '...')
-   upload_cmd = "cloudsmith push raw --republish "
+   upload_cmd = "cloudsmith push raw -W -S --republish "
    if TAGS:
       upload_cmd += f"--tags '{TAGS}' "
    if CLOUDSMITH_API_KEY:
