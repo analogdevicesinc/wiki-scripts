@@ -14,7 +14,8 @@ usage () {
 
 depends () {
 	echo "Xilinx $1 must be installed and in your PATH"
-	echo "try: source /opt/Xilinx/Vivado/202x.x/settings64.sh"
+	echo "Try (2025 and newer): source /opt/Xilinx/202x.x/Vivado/settings64.sh"
+	echo "or try (2024 and older): source /opt/Xilinx/Vivado/202x.x/settings64.sh"
 	exit 1
 }
 
@@ -80,6 +81,7 @@ if [[ "$atf_version" == "xilinx-v2021.2" ]];then atf_version="xilinx-v2021.2";fi
 if [[ "$atf_version" == "xilinx-v2022.2" ]];then atf_version="xilinx-v2022.2";fi
 if [[ "$atf_version" == "xilinx-v2023.1" ]];then atf_version="xilinx-v2023.1";fi
 if [[ "$atf_version" == "xilinx-v2023.2" ]];then atf_version="xilinx-v2023.2";fi
+if [[ "$atf_version" == "xilinx-v2025.1" ]];then atf_version="xilinx-v2025.1";fi
 
 if [[ "$4" == "uart1" ]];then console="cadence1";else console="cadence0";fi
 
