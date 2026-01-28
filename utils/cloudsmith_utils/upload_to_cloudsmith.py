@@ -118,7 +118,7 @@ else:
 
 for FILE in LOCAL_PATHS_LIST:
    if not NO_REL_PATH:
-      FILE_VERSION = VERSION + os.path.dirname(FILE)
+      FILE_VERSION = VERSION + os.path.dirname(FILE) + '/'
    else:
       FILE_VERSION = VERSION
    print('\n\n === Start uploading ' + str(FILE) + ' on adi/' + str(CLOUDSMITH_REPO) + '...')
