@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import argparse
+import io
 import json
 import logging
 import os
@@ -7,6 +8,8 @@ from pathlib import PurePosixPath
 import requests
 import subprocess
 import sys
+import tarfile
+import zipfile
 
 ########################### Global Vars Instantiation ####################
 API_URL = "https://api.cloudsmith.io/v1"
@@ -460,6 +463,163 @@ def get_artifacts_from_location(package_version=None, package_name=None, folder_
     return packages
 
 
+def extract_file_from_archive(package_version=None, package_name=None, target_file=None, output_path=None, repo=None):
+    """
+    Extracts a specific file from a tar.gz or zip archive on Cloudsmith without
+    downloading the entire archive to disk. The archive is streamed into memory
+    and only the requested file is extracted.
+
+    :param package_version: `String` version(location) of the archive package.
+    :param package_name: `String` name of the archive (e.g., 'mypackage.tar.gz' or 'mypackage.zip').
+    :param target_file: `String` path of the file inside the archive to extract.
+    :param output_path: `String` optional path to save the extracted file. If a directory,
+                        the filename from target_file will be used. If None, returns content as bytes.
+    :param repo: `String` Cloudsmith repository name.
+    :return: `bytes` content of the extracted file if output_path is None, otherwise None.
+    """
+    # Mandatory parameters - use args as fallback if parameter not provided
+    if not package_version and args:
+        package_version = args.package_version
+    if not package_version:
+        raise SystemError("package_version is required to extract file from archive.")
+
+    if not package_name and args:
+        package_name = args.package_name
+    if not package_name:
+        raise SystemError("package_name is required to extract file from archive.")
+
+    if not target_file:
+        raise SystemError("target_file is required to extract file from archive.")
+
+    if not repo and args:
+        repo = args.repo
+    if not repo:
+        raise SystemError("repo is required to extract file from archive.")
+
+    if not package_version.startswith("^"):
+        package_version = f"^{package_version}"
+    if not package_version.endswith("$"):
+        package_version += "$"
+
+    query = f"version:{package_version}+name:{package_name}"
+    packages = _get_all_packages(query, repo)
+
+    if not packages:
+        raise SystemError(f"Package not found: {package_name} at version {package_version}")
+
+    package = packages[0]
+    logger.info(f"Streaming archive from: {package['cdn_url']}")
+
+    response = requests.get(
+        package['cdn_url'],
+        headers={"X-Api-Key": os.environ["CLOUDSMITH_API_KEY"]},
+        stream=True
+    )
+    response.raise_for_status()
+
+    file_obj = io.BytesIO(response.content)
+
+    # Extract based on archive type
+    if package_name.endswith('.tar.gz') or package_name.endswith('.tgz'):
+        with tarfile.open(fileobj=file_obj, mode='r:gz') as tf:
+            try:
+                member = tf.getmember(target_file)
+                extracted = tf.extractfile(member)
+                if extracted:
+                    content = extracted.read()
+                else:
+                    raise SystemError(f"Could not extract file (may be a directory): {target_file}")
+            except KeyError:
+                raise SystemError(f"File not found in archive: {target_file}")
+    elif package_name.endswith('.zip'):
+        with zipfile.ZipFile(file_obj, 'r') as zf:
+            try:
+                content = zf.read(target_file)
+            except KeyError:
+                raise SystemError(f"File not found in archive: {target_file}")
+    else:
+        raise SystemError(f"Unsupported archive format: {package_name}. Supported: .tar.gz, .tgz, .zip")
+
+    logger.info(f"Extracted '{target_file}' ({len(content)} bytes) from {package_name}")
+
+    if output_path:
+        if os.path.isdir(output_path):
+            output_path = os.path.join(output_path, os.path.basename(target_file))
+        with open(output_path, 'wb') as f:
+            f.write(content)
+        logger.info(f"Saved to: {output_path}")
+        return None
+
+    return content
+
+
+def list_archive_contents(package_version=None, package_name=None, repo=None):
+    """
+    Lists the contents of a tar.gz or zip archive on Cloudsmith without
+    downloading the entire archive to disk.
+
+    :param package_version: `String` version(location) of the archive package.
+    :param package_name: `String` name of the archive (e.g., 'mypackage.tar.gz' or 'mypackage.zip').
+    :param repo: `String` Cloudsmith repository name.
+    :return: `List` of tuples (filename, size) for each file in the archive.
+    """
+    # Mandatory parameters - use args as fallback if parameter not provided
+    if not package_version and args:
+        package_version = args.package_version
+    if not package_version:
+        raise SystemError("package_version is required to list archive contents.")
+
+    if not package_name and args:
+        package_name = args.package_name
+    if not package_name:
+        raise SystemError("package_name is required to list archive contents.")
+
+    if not repo and args:
+        repo = args.repo
+    if not repo:
+        raise SystemError("repo is required to list archive contents.")
+
+    if not package_version.startswith("^"):
+        package_version = f"^{package_version}"
+    if not package_version.endswith("$"):
+        package_version += "$"
+
+    query = f"version:{package_version}+name:{package_name}"
+    packages = _get_all_packages(query, repo)
+
+    if not packages:
+        raise SystemError(f"Package not found: {package_name} at version {package_version}")
+
+    package = packages[0]
+    logger.info(f"Streaming archive from: {package['cdn_url']}")
+
+    response = requests.get(
+        package['cdn_url'],
+        headers={"X-Api-Key": os.environ["CLOUDSMITH_API_KEY"]},
+        stream=True
+    )
+    response.raise_for_status()
+
+    file_obj = io.BytesIO(response.content)
+    contents = []
+
+    if package_name.endswith('.tar.gz') or package_name.endswith('.tgz'):
+        with tarfile.open(fileobj=file_obj, mode='r:gz') as tf:
+            for member in tf.getmembers():
+                if not member.isdir():
+                    contents.append((member.name, member.size))
+    elif package_name.endswith('.zip'):
+        with zipfile.ZipFile(file_obj, 'r') as zf:
+            for info in zf.infolist():
+                if not info.is_dir():
+                    contents.append((info.filename, info.file_size))
+    else:
+        raise SystemError(f"Unsupported archive format: {package_name}. Supported: .tar.gz, .tgz, .zip")
+
+    logger.info(f"Found {len(contents)} files in {package_name}")
+    return contents
+
+
 def deploy_to_location(local_path=None, package_version=None, package_tags=None, repo=None):
     """
     Function which uploads a package to Cloudsmith, from the given `local_path` to the given repository with
@@ -591,6 +751,8 @@ if __name__ == "__main__":
         help(copy_to_location)
         help(remove_item_from_location)
         help(get_artifacts_from_location)
+        help(extract_file_from_archive)
+        help(list_archive_contents)
         help(deploy_to_location)
         help(get_item_properties)
         help(get_item_properties_as_dict)
