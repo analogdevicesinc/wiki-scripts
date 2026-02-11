@@ -66,6 +66,8 @@ def set_arguments():
     parser.add_argument('--local_path', help="Local path of a package to be uploaded to Cloudsmith.")
     parser.add_argument('--new_package_version', help="New package version used to copy to another location.")
     parser.add_argument('--new_repo', help="Name of a new repository to copy a package to.")
+    parser.add_argument('--target_file', help="Path of the file to extract from an archive (used with extract_file_from_archive).")
+    parser.add_argument('--output_path', help="Output path for extracted file. Can be a file path or directory (used with extract_file_from_archive).")
     parser.add_argument('--repo', help="Name of the Cloudsmith repositories to perform the actions.", required=True)
     return parser.parse_args()
 
@@ -488,8 +490,13 @@ def extract_file_from_archive(package_version=None, package_name=None, target_fi
     if not package_name:
         raise SystemError("package_name is required to extract file from archive.")
 
+    if not target_file and args:
+        target_file = args.target_file
     if not target_file:
         raise SystemError("target_file is required to extract file from archive.")
+
+    if not output_path and args:
+        output_path = args.output_path
 
     if not repo and args:
         repo = args.repo
