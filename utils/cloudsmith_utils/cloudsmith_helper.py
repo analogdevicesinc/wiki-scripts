@@ -1,4 +1,12 @@
 #!/usr/bin/python3
+
+# File name: cloudsmith_helper.py
+# Author: Nicu Siderias <nicu.siderias@analog.com>
+# Description: Helper script for interacting with the Cloudsmith package repository API.
+#              Provides functions to upload, download, copy, delete, and query packages
+#              using Cloudsmith's version field as a virtual folder structure.
+#              Requires CLOUDSMITH_API_KEY environment variable.
+
 import argparse
 import json
 import logging
@@ -7,12 +15,13 @@ from pathlib import PurePosixPath
 import requests
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ########################### Global Vars Instantiation ####################
 API_URL = "https://api.cloudsmith.io/v1"
 
 if "CLOUDSMITH_API_KEY" not in os.environ:
-    raise SystemError("CLOUDSMITH_API_KEY variable is not exported.")
+    raise SystemError("Cloudsmith_helper: CLOUDSMITH_API_KEY variable is not exported.")
 
 
 def configure_logger(enable_logging=False):
@@ -53,7 +62,7 @@ def set_arguments():
     parser = argparse.ArgumentParser(
         prog="Cloudsmith Helper Script",
         description="This is a helper script for interacting with the Cloudsmith server. "
-                    "Required environmental variables: CLOUDSMITH_REPO, CLOUDSMITH_API_KEY.",
+                    "Required environmental variables: CLOUDSMITH_API_KEY.",
         epilog="Common error codes: 400: Bad Request, 401: Unauthorized, 403: Forbidden, 404: Not Found, 422: Unprocess Entity"
                "https://docs.cloudsmith.com/api/error-handling")
     parser.add_argument('--method', help="Method to invoke from this script.")
@@ -69,38 +78,43 @@ def set_arguments():
 
 ########################### Define Helper Methods ########################
 def _get_all_packages(query, repo):
-    """
-    Function that uses the `query` parameter to get a list of packages
-    from Cloudsmith
-
-    :param query: `String` Cloudsmith api query parameter
-    :param repo: `String` Cloudsmith repository name
-    :return: `List` of packages
-    """
-    page = 1
-    page_size = 50
-    data_count = 50
-    packages = []
+    page_size = 500
     cloudsmith_repo = format_repo(repo)
+    base_url = f"{API_URL}/packages/{cloudsmith_repo}?query={query}&page_size={page_size}"
+    headers = {"X-Api-Key": os.environ["CLOUDSMITH_API_KEY"]}
 
-    while data_count == page_size:
-        url = f"{API_URL}/packages/{cloudsmith_repo}?query={query}&page={page}&page_size={page_size}"
-        r = requests.get(url, headers={"X-Api-Key": os.environ["CLOUDSMITH_API_KEY"]})
+    # First request to get total count
+    r = requests.get(f"{base_url}&page=1", headers=headers)
+    if not r.ok:
+        if r.status_code == 404 and json.loads(r.text).get("detail") == "Invalid page.":
+            return []
+        raise SystemError(f"Request to the Cloudsmith API failed - {base_url}. Status code: {r.status_code}")
 
-        # Handle "Invalid page" error when there are no more pages (e.g., exactly 50 items)
-        if r.status_code == 404:
-            response_data = json.loads(r.text)
-            if response_data.get("detail") == "Invalid page.":
-                break
-            raise SystemError(f"Request to the Cloudsmith API failed - {url}. Response: {r.text}")
+    packages = json.loads(r.text)
 
-        if not r.ok:
-            raise SystemError(f"Request to the Cloudsmith API failed - {url}. Status code: {r.status_code}")
+    # Get number of pages from response headers
+    total_pages = int(r.headers.get("x-pagination-pagetotal"))
 
-        p = json.loads(r.text)
-        data_count = len(p)
-        packages.extend(p)
-        page += 1
+    if total_pages <= 1:
+        return packages
+
+    def fetch_page(page):
+        """
+        Function which fetches packages from one page.
+        """
+        url = f"{base_url}&page={page}"
+        resp = requests.get(url, headers=headers)
+        if resp.status_code == 404 and json.loads(resp.text).get("detail") == "Invalid page.":
+            return []
+        if not resp.ok:
+            raise SystemError(f"Request failed - {url}. Status code: {resp.status_code}")
+        return json.loads(resp.text)
+
+    # Fetch remaining pages in parallel
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_page, page): page for page in range(2, total_pages + 1)}
+        for future in as_completed(futures):
+            packages.extend(future.result())
 
     return packages
 
@@ -120,12 +134,12 @@ def check_path(package_version=None, repo=None):
     if not package_version and args:
         package_version = args.package_version
     if not package_version:
-        raise SystemError("package_version is required to check if a path exists.")
+        raise SystemError("Cloudsmith_helper: package_version is required to check if a path exists.")
 
     if not repo and args:
         repo = args.repo
     if not repo:
-        raise SystemError("repo is required to check if a path exists.")
+        raise SystemError("Cloudsmith_helper: repo is required to check if a path exists.")
 
     if not package_version.startswith("^"):
         package_version = f"^{package_version}"
@@ -157,12 +171,12 @@ def get_subfolders(package_version=None, repo=None):
     if not package_version and args:
         package_version = args.package_version
     if not package_version:
-        raise SystemError("package_version is required to get subfolders.")
+        raise SystemError("Cloudsmith_helper: package_version is required to get subfolders.")
 
     if not repo and args:
         repo = args.repo
     if not repo:
-        raise SystemError("repo is required to get subfolders.")
+        raise SystemError("Cloudsmith_helper: repo is required to get subfolders.")
 
     logger.info(f"Getting subfolders for version: '{package_version}' in repo: '{repo}'")
 
@@ -174,7 +188,7 @@ def get_subfolders(package_version=None, repo=None):
 
     packages = _get_all_packages(f"version:{enhance_package_version}", repo)
 
-    folders = list(set(p.parts[0] for package in packages if (p := PurePosixPath(package["version"]).relative_to(package_version)).parts))
+    folders = sorted(list(set(p.parts[0] for package in packages if (p := PurePosixPath(package["version"]).relative_to(package_version)).parts)))
     logger.info("Subfolders: " + str(folders))
 
     return folders
@@ -193,12 +207,12 @@ def get_files(package_version=None, repo=None):
     if not package_version and args:
         package_version = args.package_version
     if not package_version:
-        raise SystemError("package_version is required to get files.")
+        raise SystemError("Cloudsmith_helper: package_version is required to get files.")
 
     if not repo and args:
         repo = args.repo
     if not repo:
-        raise SystemError("repo is required to get files.")
+        raise SystemError("Cloudsmith_helper: repo is required to get files.")
 
     if not package_version.startswith("^"):
         package_version = f"^{package_version}"
@@ -208,11 +222,10 @@ def get_files(package_version=None, repo=None):
     logger.info(f"Getting files for version: '{package_version}' in repo: '{repo}'")
 
     packages = _get_all_packages(f"version:{package_version}", repo)
-    files = list(package["filename"] for package in packages)
+    files = sorted(list(package["filename"] for package in packages))
     logger.info("Files: " + str(files))
 
     return files
-
 
 def get_folder_structure(package_version=None, repo=None):
     """
@@ -227,12 +240,12 @@ def get_folder_structure(package_version=None, repo=None):
     if not package_version and args:
         package_version = args.package_version
     if not package_version:
-        raise SystemError("package_version is required to get folder structure.")
+        raise SystemError("Cloudsmith_helper: package_version is required to get folder structure.")
 
     if not repo and args:
         repo = args.repo
     if not repo:
-        raise SystemError("repo is required to get folder structure.")
+        raise SystemError("Cloudsmith_helper: repo is required to get folder structure.")
 
     if not package_version.startswith("^"):
         package_version = f"^{package_version}"
@@ -243,7 +256,7 @@ def get_folder_structure(package_version=None, repo=None):
 
     packages = _get_all_packages(f"version:{package_version}", repo)
 
-    folders = list(set(package["version"][len(package_version) - 1:] for package in packages))
+    folders = sorted(list(set(package["version"][len(package_version) - 1:] for package in packages)))
     logger.info("Subfolders: " + str(folders))
 
     return folders
@@ -256,25 +269,25 @@ def get_folder_and_files_structure(package_version=None, repo=None):
 
     :param package_version: `String` location to get folder structure for
     :param repo: `String` Cloudsmith repository name.
-    :return: `List` list of files at the given location (with relative paths)
+    :return: `Dict<String, List<String>>` dictionary with folder paths as keys and list of files as values
     """
     # Mandatory parameters - use args as fallback if parameter not provided
     if not package_version and args:
         package_version = args.package_version
     if not package_version:
-        raise SystemError("package_version is required to get folder structure.")
+        raise SystemError("Cloudsmith_helper: package_version is required to get folder structure.")
 
     if not repo and args:
         repo = args.repo
     if not repo:
-        raise SystemError("repo is required to get folder structure.")
+        raise SystemError("Cloudsmith_helper: repo is required to get folder structure.")
 
     if not package_version.startswith("^"):
         package_version = f"^{package_version}"
     if not package_version.endswith("/"):
         package_version += "/"
 
-    logger.info(f"Getting folde and files structure for version: '{package_version}' in repo: '{repo}'")
+    logger.info(f"Getting folder and files structure for version: '{package_version}' in repo: '{repo}'")
 
     packages = _get_all_packages(f"version:{package_version}", repo)
 
@@ -285,6 +298,7 @@ def get_folder_and_files_structure(package_version=None, repo=None):
             folders_and_files[relative_path] = []
         folders_and_files[relative_path].append(package["filename"])
 
+    folders_and_files = dict(sorted(folders_and_files.items()))
     logger.info("Subfolders and files: " + str(folders_and_files))
 
     return folders_and_files
@@ -310,12 +324,12 @@ def copy_to_location(package_version=None, package_name=None, new_package_versio
     if not package_version and args:
         package_version = args.package_version
     if not package_version:
-        raise SystemError("package_version is required to copy a package.")
+        raise SystemError("Cloudsmith_helper: package_version is required to copy a package.")
 
     if not repo and args:
         repo = args.repo
     if not repo:
-        raise SystemError("repo is required to copy a package.")
+        raise SystemError("Cloudsmith_helper: repo is required to copy a package.")
 
     if not new_package_version and args:
         new_package_version = args.new_package_version
@@ -336,7 +350,7 @@ def copy_to_location(package_version=None, package_name=None, new_package_versio
         package_version = f"^{package_version}"
 
     if package_version.endswith("/") and not package_name and not new_package_version.endswith("/"):
-        raise SystemError("If the source package_version is a folder (ends with '/'), the new_package_version must also be a folder (end with '/').")
+        raise SystemError("Cloudsmith_helper: If the source package_version is a folder (ends with '/'), the new_package_version must also be a folder (end with '/').")
 
     logger.info(f"Copying packages from version: '{package_version}' in repo: '{repo}' to version: '{new_package_version}' in repo: '{new_repo}'")
 
@@ -373,7 +387,7 @@ def remove_item_from_location(package_version=None, package_name=None, repo=None
     if not repo and args:
         repo = args.repo
     if not repo:
-        raise SystemError("repo is required to remove an item.")
+        raise SystemError("Cloudsmith_helper: repo is required to remove an item.")
 
     # Optional parameters - use args as fallback if parameter not provided
     if not package_version and args:
@@ -424,12 +438,12 @@ def get_artifacts_from_location(package_version=None, package_name=None, folder_
     if not package_version and args:
         package_version = args.package_version
     if not package_version:
-        raise SystemError("package_version is required to get artifacts.")
+        raise SystemError("Cloudsmith_helper: package_version is required to get artifacts.")
 
     if not repo and args:
         repo = args.repo
     if not repo:
-        raise SystemError("repo is required to get artifacts.")
+        raise SystemError("Cloudsmith_helper: repo is required to get artifacts.")
 
     # Optional parameters - use args as fallback if parameter not provided
     if not package_name and args:
@@ -477,12 +491,12 @@ def deploy_to_location(local_path=None, package_version=None, package_tags=None,
     if not local_path and args:
         local_path = args.local_path
     if not local_path:
-        raise SystemError("local_path is required to deploy a package.")
+        raise SystemError("Cloudsmith_helper: local_path is required to deploy a package.")
 
     if not repo and args:
         repo = args.repo
     if not repo:
-        raise SystemError("repo is required to deploy a package.")
+        raise SystemError("Cloudsmith_helper: repo is required to deploy a package.")
 
     if not package_version and args:
         package_version = args.package_version
@@ -506,7 +520,7 @@ def deploy_to_location(local_path=None, package_version=None, package_tags=None,
     else:
         # Remove -k and API key from command for safe logging
         cmd_safe = [arg for i, arg in enumerate(cmd) if arg != "-k" and (i == 0 or cmd[i - 1] != "-k")]
-        raise SystemError(f"cmd: {cmd_safe} failed with exit code {output.returncode}!")
+        raise SystemError(f"cmd: {cmd_safe} failed with exit code {output.returncode}! {output.stderr.decode('utf-8')}")
 
 
 def get_item_properties(package_version=None, package_name=None, repo=None):
@@ -522,12 +536,12 @@ def get_item_properties(package_version=None, package_name=None, repo=None):
     if not package_name and args:
         package_name = args.package_name
     if not package_name:
-        raise SystemError("package_name is required to get item properties.")
+        raise SystemError("Cloudsmith_helper: package_name is required to get item properties.")
 
     if not repo and args:
         repo = args.repo
     if not repo:
-        raise SystemError("repo is required to get item properties.")
+        raise SystemError("Cloudsmith_helper: repo is required to get item properties.")
 
     # Optional parameters - use args as fallback if parameter not provided
     if not package_version and args:
@@ -577,7 +591,7 @@ if __name__ == "__main__":
     args = set_arguments()
 
     if not args:
-        raise SystemError("Arguments failed to parse or are missing, try using `-h`")
+        raise SystemError("Cloudsmith_helper: Arguments failed to parse or are missing, try using `-h`")
 
     if args.method is None:
         # Set pager to cat so that scrolling is not enabled
@@ -599,5 +613,5 @@ if __name__ == "__main__":
             logger.info(args.method)
             method = globals()[args.method]
         except Exception:
-            raise SystemError("Method not found: " + args.method)
+            raise SystemError("Cloudsmith_helper: Method not found: " + args.method)
         method()
