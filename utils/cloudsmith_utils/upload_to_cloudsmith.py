@@ -28,6 +28,9 @@ print_lock = Lock()
 # Shutdown flag for graceful termination
 shutdown_requested = False
 
+# Log file handle (set during main if --log_file is provided)
+log_file_handle = None
+
 
 def signal_handler(sig, frame):
     """Handle SIGINT/SIGTERM for graceful shutdown."""
@@ -40,9 +43,12 @@ def signal_handler(sig, frame):
     safe_print("\nShutdown requested, waiting for current uploads to finish...")
 
 def safe_print(msg):
-    """Thread-safe printing."""
+    """Thread-safe printing to stdout and optionally to log file."""
     with print_lock:
         print(msg, flush=True)
+        if log_file_handle:
+            log_file_handle.write(msg + '\n')
+            log_file_handle.flush()
 
 def upload_file(file_path, version, repo, api_key, tags, no_rel_path, base_local_path):
     """
@@ -117,12 +123,14 @@ def collect_files(local_path):
             for fname in fnames:
                 file_path = os.path.join(dpath, fname)
                 files.append(file_path)
-                print(f"Found: {file_path}")
+                safe_print(f"Found: {file_path}")
     elif os.path.isfile(abs_path):
         files.append(abs_path)
-        print(f"Detected that {abs_path} is a file.")
+        safe_print(f"Detected that {abs_path} is a file.")
     else:
-        print(f"Error: Path does not exist: {abs_path}")
+        safe_print(f"Error: Path does not exist: {abs_path}")
+        if log_file_handle:
+            log_file_handle.close()
         sys.exit(1)
 
     return files, abs_path
@@ -151,8 +159,15 @@ def main():
                         help="Cloudsmith repository name")
     parser.add_argument("--max_workers", type=int, default=10,
                         help="Maximum parallel uploads (default: 10)")
+    parser.add_argument("--log_file",
+                        help="Local file where to save the logs, if no file is specified the logs will be printed in terminal")
 
     args = parser.parse_args()
+
+    # Setup log file if specified
+    global log_file_handle
+    if args.log_file:
+        log_file_handle = open(args.log_file, 'a')
 
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
@@ -161,7 +176,9 @@ def main():
     # Get API key
     api_key = args.token or os.environ.get('CLOUDSMITH_API_KEY')
     if not api_key:
-        print("Error: --token or CLOUDSMITH_API_KEY environment variable required")
+        safe_print("Error: --token or CLOUDSMITH_API_KEY environment variable required")
+        if log_file_handle:
+            log_file_handle.close()
         sys.exit(1)
 
     # Normalize version path
@@ -173,11 +190,13 @@ def main():
     files, base_path = collect_files(args.local_path)
 
     if not files:
-        print("No files found to upload")
+        safe_print("No files found to upload")
+        if log_file_handle:
+            log_file_handle.close()
         sys.exit(1)
 
-    print(f"\nFound {len(files)} files to upload")
-    print(f"Using {args.max_workers} parallel workers\n")
+    safe_print(f"\nFound {len(files)} files to upload")
+    safe_print(f"Using {args.max_workers} parallel workers\n")
 
     # Upload files in parallel
     success_count = 0
@@ -219,21 +238,27 @@ def main():
                 failed_files.append((file_path, message))
 
     # Summary
-    print("\n" + "=" * 60)
-    print(f"Upload complete: {success_count}/{len(files)} succeeded")
+    safe_print("\n" + "=" * 60)
+    safe_print(f"Upload complete: {success_count}/{len(files)} succeeded")
 
     if shutdown_requested:
         not_started = len(files) - success_count - len(failed_files)
-        print(f"\nShutdown requested - {not_started} uploads were cancelled")
+        safe_print(f"\nShutdown requested - {not_started} uploads were cancelled")
+        if log_file_handle:
+            log_file_handle.close()
         sys.exit(130)  # Standard exit code for SIGINT termination
 
     if failed_files:
-        print(f"\nFailed uploads ({len(failed_files)}):")
+        safe_print(f"\nFailed uploads ({len(failed_files)}):")
         for f, msg in failed_files:
-            print(f"  - {os.path.basename(f)}: {msg}")
+            safe_print(f"  - {os.path.basename(f)}: {msg}")
+        if log_file_handle:
+            log_file_handle.close()
         sys.exit(1)
     else:
-        print("All uploads successful!")
+        safe_print("All uploads successful!")
+        if log_file_handle:
+            log_file_handle.close()
         sys.exit(0)
 
 
