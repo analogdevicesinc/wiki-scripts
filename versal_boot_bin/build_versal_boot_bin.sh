@@ -39,7 +39,7 @@ if [ ! -f $XSA_FILE ]; then
 	usage
 fi
 
-### Check for required Xilinx tools (starting with 2019.2 there is no hsi anymore)
+## Check for required Xilinx tools (starting with 2019.2 there is no hsi anymore)
 command -v bootgen >/dev/null 2>&1 || depends bootgen
 
 rm -Rf $BUILD_DIR $OUTPUT_DIR
@@ -51,6 +51,14 @@ board=${board_id#BoardId=\"}
 cp $BUILD_DIR/system_top.pdi $OUTPUT_DIR/system_top.pdi
 export CROSS_COMPILE=aarch64-linux-gnu-
 
+tool_version=$(vivado -version | sed -n '1p' | cut -d' ' -f 2)
+tool_year=$(echo "$tool_version" | sed 's/v//;s/\..*//')
+
+if [ -z "$tool_version" ] ; then
+	echo "Could not determine Vivado version"
+	exit 1
+fi
+
 ### Check if UBOOT_FILE is .elf or path to u-boot repository
 if [ "$UBOOT_FILE" != "" ] && [ -d $UBOOT_FILE ]; then
 ### Build u-boot.elf
@@ -60,13 +68,16 @@ if [ "$UBOOT_FILE" != "" ] && [ -d $UBOOT_FILE ]; then
 )
 	cp $UBOOT_FILE/u-boot.elf $OUTPUT_DIR/u-boot.elf
 elif [ "$UBOOT_FILE" == "download" ]; then
-(
-	cd $BUILD_DIR
-	git clone https://github.com/Xilinx/u-boot-xlnx
-	cd u-boot-xlnx
-	build_u_boot
-)
-	cp $BUILD_DIR/u-boot-xlnx/u-boot.elf $OUTPUT_DIR/u-boot.elf
+	if [[ "$tool_version" == "v2025.1" ]]; then
+		curl -L -o "$OUTPUT_DIR/system.dtb" "https://github.com/Xilinx/soc-prebuilt-firmware/raw/xilinx_v2024.1/${board}-versal/system-default.dtb"
+		curl -L -o "$OUTPUT_DIR/u-boot.elf" "https://github.com/Xilinx/soc-prebuilt-firmware/raw/xilinx_v2024.1/${board}-versal/u-boot.elf"
+	elif [[ "$tool_version" == "v2023.1" ]]; then
+		curl -L -o "$OUTPUT_DIR/system.dtb" "https://github.com/Xilinx/soc-prebuilt-firmware/raw/xilinx_${tool_version}/${board}-versal/system.dtb"
+		curl -L -o "$OUTPUT_DIR/u-boot.elf" "https://github.com/Xilinx/soc-prebuilt-firmware/raw/xilinx_${tool_version}/${board}-versal/u-boot.elf"
+	else
+		curl -L -o "$OUTPUT_DIR/system.dtb" "https://github.com/Xilinx/soc-prebuilt-firmware/raw/xilinx_${tool_version}/${board}-versal/system-default.dtb"
+		curl -L -o "$OUTPUT_DIR/u-boot.elf" "https://github.com/Xilinx/soc-prebuilt-firmware/raw/xilinx_${tool_version}/${board}-versal/u-boot.elf"
+	fi
 else
 	echo $UBOOT_FILE | grep -q -e ".elf" || usage
 	if [ ! -f $UBOOT_FILE ]; then
@@ -76,11 +87,6 @@ else
 	cp $UBOOT_FILE $OUTPUT_DIR/u-boot.elf
 fi
 
-tool_version=$(vivado -version | sed -n '1p' | cut -d' ' -f 2)
-if [ -z "$tool_version" ] ; then
-	echo "Could not determine Vivado version"
-	exit 1
-fi
 atf_version=xilinx-$tool_version
 if [[ "$atf_version" == "xilinx-v2021.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1";fi
 if [[ "$atf_version" == "xilinx-v2021.1.1" ]];then atf_version="xlnx_rebase_v2.4_2021.1_update1";fi
@@ -114,21 +120,26 @@ fi
 echo "the_ROM_image:"                                                   >  $OUTPUT_DIR/versal.bif
 echo "{"                                                                >> $OUTPUT_DIR/versal.bif
 echo "  image {"                                                        >> $OUTPUT_DIR/versal.bif
-echo "    { type=bootimage, file=system_top.pdi}"			>> $OUTPUT_DIR/versal.bif
-echo "  }"                                                              >> $OUTPUT_DIR/versal.bif
+echo "    { type=bootimage, file=system_top.pdi}"                       >> $OUTPUT_DIR/versal.bif
+echo " } " 																>> $OUTPUT_DIR/versal.bif
 echo "  image {"                                                        >> $OUTPUT_DIR/versal.bif
 echo "    id = 0x1c000000, name=apu_subsystem"                          >> $OUTPUT_DIR/versal.bif
+if (( $tool_year > 2022 )); then
+	echo "    { type=raw, load=0x00001000, file=system.dtb }"   		>> $OUTPUT_DIR/versal.bif
+fi
 echo "    { core=a72-0, exception_level=el-3, trustzone, file=bl31.elf}">> $OUTPUT_DIR/versal.bif
 echo "    { core=a72-0, exception_level=el-2, file=u-boot.elf}"         >> $OUTPUT_DIR/versal.bif
 echo "  }"                                                              >> $OUTPUT_DIR/versal.bif
 echo "}"                                                                >> $OUTPUT_DIR/versal.bif
 
 ### Create boot.txt files used to create boot.src
-echo ' '                                     >  $OUTPUT_DIR/boot.txt
-echo 'Load boot image from ${boot_target}...'>> $OUTPUT_DIR/boot.txt
-echo 'fatload mmc 0 0x00200000 Image'        >> $OUTPUT_DIR/boot.txt
-echo 'fatload mmc 0 0x00001000 system.dtb'   >> $OUTPUT_DIR/boot.txt
-echo 'booti 0x00200000 - 0x00001000'         >> $OUTPUT_DIR/boot.txt
+echo ' '                                     							>  $OUTPUT_DIR/boot.txt
+echo 'Load boot image from ${boot_target}...'							>> $OUTPUT_DIR/boot.txt
+echo 'fatload mmc 0 0x00200000 Image'        							>> $OUTPUT_DIR/boot.txt
+if (( $tool_year > 2022 )); then
+	echo 'fatload mmc 0 0x00001000 system.dtb'   						>> $OUTPUT_DIR/boot.txt
+fi
+echo 'booti 0x00200000 - 0x00001000'         							>> $OUTPUT_DIR/boot.txt
 
 ### Build BOOT.BIN file and boot.src (replacement for uEnv.txt for versal boards)
 (
@@ -143,5 +154,5 @@ if [[ ( $4 == "uart"* && ${#5} -ne 0 ) ]]; then
 fi
 
 if [[ ( ${#4} -ne 0 && $4 != "uart"* && ${#5} -eq 0 ) ]]; then
-        tar czvf $4.tar.gz $OUTPUT_DIR
+	tar czvf $4.tar.gz $OUTPUT_DIR
 fi
