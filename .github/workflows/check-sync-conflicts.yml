@@ -1,0 +1,43 @@
+name: Check sync conflicts
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'utils/cloudsmith_utils/**'
+
+jobs:
+  check-conflicts:
+    # Only run on sync PRs from the bot
+    if: github.head_ref == 'sync-cloudsmith-helper'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for local changes that would be overwritten
+        run: |
+          # Get the merge base (last common commit)
+          MERGE_BASE=$(git merge-base origin/main HEAD)
+
+          # Check if main has commits touching synced files since merge base
+          MAIN_CHANGES=$(git log --oneline "$MERGE_BASE..origin/main" -- utils/cloudsmith_utils/)
+
+          if [ -n "$MAIN_CHANGES" ]; then
+            echo "::error::Local changes detected in utils/cloudsmith_utils/ that would be overwritten by this sync."
+            echo ""
+            echo "Commits on main since last sync:"
+            echo "$MAIN_CHANGES"
+            echo ""
+            echo "Please cherry-pick these changes to innersource first, or resolve manually."
+            exit 1
+          fi
+
+          echo "No local changes detected. Safe to merge."
