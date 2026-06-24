@@ -1,0 +1,28 @@
+name: Cpp-check for opensource repos
+
+description:
+  Action to run cpp-check tool for opensource repos
+
+inputs:
+  args:
+    description:
+      Extra args for the cppcheck commandline tool
+    required: false
+    default: --quiet --force --enable=warning,performance,portability,style --std=c++11
+  paths:
+    description:
+      Paths for the cppcheck commandline tool to run
+    required: false
+    default: .
+
+runs:
+  using: composite
+  steps:
+    - name: Install cppcheck tool
+      shell: sh
+      run: |
+        sudo apt-get install cppcheck
+    - name: Run cppcheck
+      shell: sh
+      run: |
+        cppcheck ${{ inputs.args }} ${{ inputs.paths }}

@@ -1,0 +1,60 @@
+name: Build ToF Action
+
+description:
+  Action to build ToF related repos on opensource
+
+inputs:
+  source-path:
+    description: 
+      Path of the source to be build
+    required: false
+    default: .
+  default-cmake-flags:
+    description:
+      Default arguments for the cmake build
+    required: false
+    default: -DWITH_NETWORK=1 -DWITH_PYTHON=1 -DWITH_OPENCV=1 -DWITH_EXAMPLES=1 -DWITH_DOC=0 -DWITH_OPEN3D=0 -DCI_BUILD=1
+  extra-cmake-flags:
+    description: 
+      Extra arguments for the cmake build
+    required: false
+    default:
+  build-type:
+    description:
+      Type of build - default, docker or windows
+    default: default
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Install deps linux
+      if: ${{ inputs.build-type != 'windows' }}
+      shell: sh
+      run: |
+        ${{ github.action_path }}/bin/install-deps.sh
+      env:
+        DEPS_DIR: ${{ inputs.source-path }}/build/deps
+        BUILD_TYPE: ${{ inputs.build-type }}
+    - name: Install deps windows
+      if: ${{ inputs.build-type == 'windows' }}
+      shell: pwsh
+      run: |
+        ${{ github.action_path }}/bin/install-deps.ps1
+    - name: Run build linux
+      if: ${{ inputs.build-type != 'windows' }}
+      shell: sh
+      run: |
+        ${{ github.action_path }}/bin/build-tof.sh
+      env:
+        WORK_DIR: ${{ inputs.source-path }}
+        BUILD_DIR: ${{ inputs.source-path }}/build
+        BUILD_TYPE: ${{ inputs.build-type }}
+        DEFAULT_CMAKE_FLAGS: ${{ inputs.default-cmake-flags }}
+        EXTRA_CMAKE_FLAGS: ${{ inputs.extra-cmake-flags }}
+        DOCKER: ${{ inputs.docker-image }}
+    - name: Run windows build
+      if: ${{ inputs.build-type == 'windows' }}
+      shell: pwsh
+      run: |
+        ${{ github.action_path }}/bin/build-sdk.ps1

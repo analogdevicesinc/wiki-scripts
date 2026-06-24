@@ -1,5 +1,3 @@
-# wiki-scripts
+# wiki-scripts - DEVOPS-ACTIONS
 
-A mixed set of scripts that are referenced in the
-[Analog Devices wiki](https://wiki.analog.com/).
-
+A mixed set of devops actions for usage across opensource repositories.

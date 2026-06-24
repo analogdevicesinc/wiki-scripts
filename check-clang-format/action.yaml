@@ -1,0 +1,25 @@
+name: Check clang format for opensource repos
+
+description:
+  Action to run check-clang tool for opensource repos
+
+inputs:
+  source:
+    description:
+      Source of the directory to run to check-clang tool containing .clang-format  
+    required: false
+    default: .
+
+runs:
+  using: composite
+  steps:
+    - name: Install clang-frmat tools
+      shell: sh
+      run: |
+        sudo apt install clang-format
+    - name: Run clang-format
+      shell: sh
+      run: |
+        ${{ github.action_path }}/bin/clang-format.sh 
+      env:
+        SOURCE: ${{ inputs.source }}
