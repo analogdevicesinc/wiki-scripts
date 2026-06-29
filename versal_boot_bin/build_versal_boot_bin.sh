@@ -4,11 +4,12 @@ set -ex
 XSA_FILE=$1
 UBOOT_FILE=${2:-download}
 ATF_FILE=${3:-download}
+DTB_FILE=${4:-download}
 BUILD_DIR=build_boot_bin
 OUTPUT_DIR=output_boot_bin
 
 usage () {
-	echo "usage: $0 system_top.xsa (download | u-boot.elf | <path-to-u-boot-source>) (download | bl31.elf | <path-to-arm-trusted-firmware-source>) [output-archive]"
+	echo "usage: $0 system_top.xsa (download | u-boot.elf | <path-to-u-boot-source>) (download | bl31.elf | <path-to-arm-trusted-firmware-source>) (<path to system.dtb> if UBOOT is provided) [output-archive]"
 	exit 1
 }
 
@@ -46,7 +47,10 @@ rm -Rf $BUILD_DIR $OUTPUT_DIR
 mkdir -p $OUTPUT_DIR
 mkdir -p $BUILD_DIR
 unzip $XSA_FILE -d $BUILD_DIR
-board_id=$(grep -E -o 'BoardId="[[:alnum:]]+' $BUILD_DIR/xsa.xml)
+### board is only needed to build download URLs; tolerate a missing BoardId
+### when u-boot, atf and dtb are all supplied as arguments
+all_files_provided() { [ "$UBOOT_FILE" != "download" ] && [ "$DTB_FILE" != "download" ]; }
+board_id=$(grep -E -o 'BoardId="[[:alnum:]]+' $BUILD_DIR/xsa.xml) || all_files_provided || usage
 board=${board_id#BoardId=\"}
 cp $BUILD_DIR/system_top.pdi $OUTPUT_DIR/system_top.pdi
 export CROSS_COMPILE=aarch64-linux-gnu-
@@ -67,7 +71,7 @@ if [ "$UBOOT_FILE" != "" ] && [ -d $UBOOT_FILE ]; then
 	build_u_boot
 )
 	cp $UBOOT_FILE/u-boot.elf $OUTPUT_DIR/u-boot.elf
-elif [ "$UBOOT_FILE" == "download" ]; then
+elif [ "$UBOOT_FILE" == "download" ] && [ "$DTB_FILE" == "download" ]; then
 	if [[ "$tool_version" == "v2025.1" ]]; then
 		curl -L -o "$OUTPUT_DIR/system.dtb" "https://github.com/Xilinx/soc-prebuilt-firmware/raw/xilinx_v2024.1/${board}-versal/system-default.dtb"
 		curl -L -o "$OUTPUT_DIR/u-boot.elf" "https://github.com/Xilinx/soc-prebuilt-firmware/raw/xilinx_v2024.1/${board}-versal/u-boot.elf"
@@ -85,6 +89,16 @@ else
 		usage
 	fi
 	cp $UBOOT_FILE $OUTPUT_DIR/u-boot.elf
+
+	### Require a device tree only for tool versions 2023.x or newer
+	if (( $tool_year > 2022 )); then
+		echo $DTB_FILE | grep -q -e "\.dtb" || usage
+		if [ ! -f $DTB_FILE ]; then
+			echo $DTB_FILE: File not found!
+			usage
+		fi
+		cp $DTB_FILE $OUTPUT_DIR/system.dtb
+	fi
 fi
 
 atf_version=xilinx-$tool_version
