@@ -11,6 +11,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -25,15 +26,25 @@ API_URL = "https://api.cloudsmith.io/v1"
 if "CLOUDSMITH_API_KEY" not in os.environ:
     raise SystemError("Cloudsmith_helper: CLOUDSMITH_API_KEY variable is not exported.")
 
+session = requests.Session()
+session.headers.update({"X-Api-Key": os.environ["CLOUDSMITH_API_KEY"]})
 
-def configure_logger(enable_logging=False):
+
+def configure_logger(enable_logging=False, debug=False):
     logger.setLevel(logging.INFO)
 
     if logger.handlers:
         logger.handlers.clear()
 
-    if __name__ == "__main__" or enable_logging:
+    if __name__ == "__main__" or enable_logging or debug:
         handler = logging.StreamHandler(sys.stdout)
+        if debug:
+            logger.setLevel(logging.DEBUG)
+            formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+        else:
+            logger.setLevel(logging.INFO)
+            formatter = logging.Formatter("%(message)s")
+        handler.setFormatter(formatter)
     else:
         handler = logging.FileHandler(os.devnull)
 
@@ -50,6 +61,18 @@ def format_repo(repo):
     if not repo.startswith("adi/"):
         return "adi/" + repo
     return repo
+
+
+def log_on_exit(func):
+    def wrapper(*args, **kwargs):
+        logger.debug(f"{func.__name__}: ENTERING")
+        start = time.time()
+        result = func(*args, **kwargs)
+        elapsed = time.time() - start
+        logger.debug(f"{func.__name__}: DONE ({elapsed:.2f}s)")
+        return result
+
+    return wrapper
 
 
 logger = logging.getLogger(__name__)
@@ -87,18 +110,43 @@ def set_arguments():
 
 
 ########################### Define Helper Methods ########################
+_packages_cache = {}
+
+
+@log_on_exit
 def _get_all_packages(query, repo):
+    # Cache: strip +name: from query, fetch all packages for that version,
+    # then filter locally by name if needed.
+    name_filter = None
+    version_query = query
+    if "+name:" in query:
+        version_query, name_filter = query.split("+name:", 1)
+
+    cache_key = (version_query, repo)
+    if cache_key in _packages_cache:
+        logger.debug(f"Cache hit for {version_query} in {repo}")
+        if name_filter:
+            return [p for p in _packages_cache[cache_key] if re.search(name_filter, p["name"])]
+        return _packages_cache[cache_key]
+
     page_size = 500
     cloudsmith_repo = format_repo(repo)
-    base_url = f"{API_URL}/packages/{cloudsmith_repo}?query={query}&page_size={page_size}"
-    headers = {"X-Api-Key": os.environ["CLOUDSMITH_API_KEY"]}
+    base_url = f"{API_URL}/packages/{cloudsmith_repo}?query={version_query}&page_size={page_size}"
 
     # First request to get total count
-    r = requests.get(f"{base_url}&page=1", headers=headers)
-    if not r.ok:
+    for attempt in range(3):
+        r = session.get(f"{base_url}&page=1")
+        if r.ok:
+            break
         if r.status_code == 404 and json.loads(r.text).get("detail") == "Invalid page.":
             return []
-        raise SystemError(f"Request to the Cloudsmith API failed - {base_url}. Status code: {r.status_code}")
+        if attempt < 2:
+            time.sleep(2)
+            logger.warning(f"Attempt {attempt + 1} failed with status {r.status_code}, retrying...")
+        else:
+            raise SystemError(
+                f"Request to the Cloudsmith API failed - {base_url}. Status code: {r.status_code}. Status message: {r.text}"
+            )
 
     packages = json.loads(r.text)
 
@@ -106,6 +154,9 @@ def _get_all_packages(query, repo):
     total_pages = int(r.headers.get("x-pagination-pagetotal"))
 
     if total_pages <= 1:
+        _packages_cache[cache_key] = packages
+        if name_filter:
+            return [p for p in packages if re.search(name_filter, p["name"])]
         return packages
 
     def fetch_page(page):
@@ -113,11 +164,19 @@ def _get_all_packages(query, repo):
         Function which fetches packages from one page.
         """
         url = f"{base_url}&page={page}"
-        resp = requests.get(url, headers=headers)
-        if resp.status_code == 404 and json.loads(resp.text).get("detail") == "Invalid page.":
-            return []
-        if not resp.ok:
-            raise SystemError(f"Request failed - {url}. Status code: {resp.status_code}")
+        for attempt in range(3):
+            resp = session.get(url)
+            if resp.ok:
+                break
+            if resp.status_code == 404 and json.loads(resp.text).get("detail") == "Invalid page.":
+                return []
+            if attempt < 2:
+                time.sleep(2)
+                logger.warning(f"Attempt {attempt + 1} failed with status {resp.status_code}, retrying...")
+            else:
+                raise SystemError(
+                    f"Request failed - {url}. Status code: {resp.status_code}. Status message: {resp.text}"
+                )
         return json.loads(resp.text)
 
     # Fetch remaining pages in parallel
@@ -126,10 +185,14 @@ def _get_all_packages(query, repo):
         for future in as_completed(futures):
             packages.extend(future.result())
 
+    _packages_cache[cache_key] = packages
+    if name_filter:
+        return [p for p in packages if re.search(name_filter, p["name"])]
     return packages
 
 
-def check_path(package_version=None, repo=None):
+@log_on_exit
+def check_path(package_version=None, package_name=None, repo=None):
     """
     Function which checks if a path exists in Cloudsmith. This is checked using
     the version which specifies where you would expect to find a package if there
@@ -137,6 +200,7 @@ def check_path(package_version=None, repo=None):
     a subpath, otherwise the checking is done considering the regex '^version$'
 
     :param package_version: `String` location to check. Relative URL after REPO.
+    :param package_name: `String` Name of the package to check.
     :param repo: `String` Cloudsmith repository name.
     :return: `Boolean` True if the path exists, False otherwise.
     """
@@ -151,23 +215,24 @@ def check_path(package_version=None, repo=None):
     if not repo:
         raise SystemError("Cloudsmith_helper: repo is required to check if a path exists.")
 
-    if not package_version.startswith("^"):
-        package_version = f"^{package_version}"
-    if not package_version.endswith("/"):
-        package_version += "$"
+    if not package_name and args:
+        package_name = args.package_name
+    if not package_name:
+        raise SystemError("Cloudsmith_helper: package_name is required to check if a path exists.")
 
-    logger.info(f"Checking path existence for version: '{package_version}' in repo: '{repo}'")
+    package_version = package_version.replace("/", "-")
+    url = f"https://dl.cloudsmith.io/basic/adi/{repo}/raw/versions/{package_version}/{package_name}"
 
-    packages = _get_all_packages(f"version:{package_version}", repo)
+    logger.info(f"Checking path existence for version: '{package_version}' and file'{package_name}' in repo: '{repo}'")
 
-    if not packages:
-        logger.info("Path does not exist")
-        return False
+    response = session.head(url)
+    if response.status_code == 200:
+        return True
+    logger.info(f"Response status code: {response.status_code} for URL: {url}.")
+    return False
 
-    logger.info("Path exists")
-    return True
 
-
+@log_on_exit
 def get_subfolders(package_version=None, repo=None):
     """
     Function which gets the list of subfolders from Cloudsmith, using `package_version`
@@ -216,6 +281,7 @@ def get_subfolders(package_version=None, repo=None):
     return folders
 
 
+@log_on_exit
 def get_files(package_version=None, repo=None):
     """
     Function which gets the list of files from Cloudsmith, with the version
@@ -250,6 +316,7 @@ def get_files(package_version=None, repo=None):
     return files
 
 
+@log_on_exit
 def get_folder_structure(package_version=None, repo=None):
     """
     Function which returns the folder structure present in Cloudsmith, based
@@ -285,6 +352,7 @@ def get_folder_structure(package_version=None, repo=None):
     return folders
 
 
+@log_on_exit
 def get_folder_and_files_structure(package_version=None, repo=None):
     """
     Function which returns the folder and files structure present in Cloudsmith, based
@@ -331,6 +399,7 @@ def get_folder_and_files_structure(package_version=None, repo=None):
     return folders_and_files
 
 
+@log_on_exit
 def copy_to_location(
     package_version=None,
     package_name=None,
@@ -416,6 +485,7 @@ def copy_to_location(
         os.remove(upload_name)
 
 
+@log_on_exit
 def remove_item_from_location(package_version=None, package_name=None, repo=None):
     """
     Function which removes a package from Cloudsmith, with the specified version
@@ -468,7 +538,7 @@ def remove_item_from_location(package_version=None, package_name=None, repo=None
         logger.info(f"Deleting package {package['name']} with identifier {package['identifier_perm']}")
         url = f"{API_URL}/packages/{cloudsmith_repo}/{package['identifier_perm']}"
         for attempt in range(3):
-            r = requests.delete(url, headers={"X-Api-Key": os.environ["CLOUDSMITH_API_KEY"]})
+            r = session.delete(url)
             if r.ok:
                 break
             if attempt < 2:
@@ -484,6 +554,7 @@ def remove_item_from_location(package_version=None, package_name=None, repo=None
             future.result()
 
 
+@log_on_exit
 def get_artifacts_from_location(package_version=None, package_name=None, keep_folder_structure=False, repo=None):
     """
     Function which downloads artifacts from Cloudsmith, that match the `package_version`.
@@ -523,26 +594,26 @@ def get_artifacts_from_location(package_version=None, package_name=None, keep_fo
     packages = _get_all_packages(query, repo)
 
     for package in packages:
-        arguments = ["curl", "-H", f"X-Api-Key: {os.environ['CLOUDSMITH_API_KEY']}", "-1LfO", package["cdn_url"]]
-        result = subprocess.run(arguments, capture_output=True)
-        if result.returncode != 0:
-            # Remove API key from arguments for safe logging
-            args_safe = [arg for i, arg in enumerate(arguments) if i != 2]
-            raise SystemError(f"curl command failed with exit code {result.returncode}: {args_safe}")
+        response = session.get(package["cdn_url"])
+        if response.status_code != 200:
+            raise SystemError(
+                f"Download failed for {package['name']} from {package['cdn_url']}. Status code: {response.status_code}"
+            )
+        with open(package["name"], "wb") as f:
+            f.write(response.content)
         if keep_folder_structure:
             dir_to_create = (
                 os.path.dirname(package["version"])
                 if "." in os.path.basename(package["version"])
                 else package["version"]
             )
-            arguments = ["mkdir", "-p", dir_to_create]
-            subprocess.run(arguments, check=True)
-            arguments = ["mv", package["name"], dir_to_create]
-            subprocess.run(arguments, check=True)
+            os.makedirs(dir_to_create, exist_ok=True)
+            os.rename(package["name"], os.path.join(dir_to_create, package["name"]))
     logger.info(f"{len(packages)} packages with version {package_version} have been downloaded")
     return packages
 
 
+@log_on_exit
 def deploy_to_location(local_path=None, package_version=None, package_tags=None, repo=None):
     """
     Function which uploads a package to Cloudsmith, from the given `local_path` to the given repository with
@@ -600,9 +671,12 @@ def deploy_to_location(local_path=None, package_version=None, package_tags=None,
     else:
         # Remove -k and API key from command for safe logging
         cmd_safe = [arg for i, arg in enumerate(cmd) if arg != "-k" and (i == 0 or cmd[i - 1] != "-k")]
-        raise SystemError(f"cmd: {cmd_safe} failed with exit code {output.returncode}! {output.stderr.decode('utf-8')}")
+        raise SystemError(
+            f"cmd: {cmd_safe} failed with exit code {output.returncode}! stderr: {output.stderr.decode('utf-8')} stdout: {output.stdout.decode('utf-8')}"
+        )
 
 
+@log_on_exit
 def get_item_properties(package_version=None, package_name=None, repo=None):
     """
     Function which gets the tags of a Cloudsmith package.
@@ -649,6 +723,7 @@ def get_item_properties(package_version=None, package_name=None, repo=None):
     return packages[0]["tags"]["info"]
 
 
+@log_on_exit
 def get_item_properties_as_dict(package_version=None, package_name=None, repo=None):
     """
     Function which gets the tags of a Cloudsmith package and return it as dictionary.
@@ -678,6 +753,7 @@ def get_item_properties_as_dict(package_version=None, package_name=None, repo=No
     return tags_dict
 
 
+@log_on_exit
 def get_sha256_for_file(package_version=None, package_name=None, repo=None):
     """
     Function which gets the sha256 of a Cloudsmith package.
@@ -732,7 +808,7 @@ if __name__ == "__main__":
     if args.method is None:
         # Set pager to cat so that scrolling is not enabled
         os.environ["PAGER"] = "cat"
-        logger.info("\nWARNING: Method argument is missing!")
+        logger.warning("Method argument is missing!")
         help(check_path)
         help(get_subfolders)
         help(get_files)
