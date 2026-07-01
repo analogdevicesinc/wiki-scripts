@@ -106,6 +106,7 @@ def set_arguments():
     parser.add_argument(
         "--keep_folder_structure", action="store_true", help="Recreate folder structure based on package version."
     )
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
     return parser.parse_args()
 
 
@@ -594,6 +595,7 @@ def get_artifacts_from_location(package_version=None, package_name=None, keep_fo
     packages = _get_all_packages(query, repo)
 
     for package in packages:
+        logger.info(f"Downloading package: {package['name']} from {package['cdn_url']}")
         response = session.get(package["cdn_url"])
         if response.status_code != 200:
             raise SystemError(
@@ -824,6 +826,7 @@ if __name__ == "__main__":
     else:
         try:
             logger.info(args.method)
+            configure_logger(True, args.debug)
             method = globals()[args.method]
         except Exception:
             raise SystemError("Cloudsmith_helper: Method not found: " + args.method)
