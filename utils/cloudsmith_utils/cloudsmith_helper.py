@@ -13,6 +13,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import PurePosixPath
 
@@ -76,6 +77,7 @@ def set_arguments():
     parser.add_argument("--package_tags", help="List of tags for a package separated by a `,`.")
     parser.add_argument("--local_path", help="Local path of a package to be uploaded to Cloudsmith.")
     parser.add_argument("--new_package_version", help="New package version used to copy to another location.")
+    parser.add_argument("--new_package_name", help="New package name used to copy to another location.")
     parser.add_argument("--new_repo", help="Name of a new repository to copy a package to.")
     parser.add_argument("--repo", help="Name of the Cloudsmith repositories to perform the actions.", required=True)
     parser.add_argument(
@@ -196,6 +198,10 @@ def get_subfolders(package_version=None, repo=None):
 
     packages = _get_all_packages(f"version:{enhance_package_version}", repo)
 
+    # Extract unique first-level subfolder names from each package's version path.
+    # For each package, compute the relative path from base package_version, then take the
+    # first component as the subfolder name. Packages at the root level (no parts) are filtered out.
+    # Example: package_version="hdl/main", package["version"]="hdl/main/boot_files" -> subfolder="boot_files"
     folders = sorted(
         list(
             set(
@@ -315,14 +321,24 @@ def get_folder_and_files_structure(package_version=None, repo=None):
             folders_and_files[relative_path] = []
         folders_and_files[relative_path].append(package["filename"])
 
-    folders_and_files = dict(sorted(folders_and_files.items()))
+    # Because we push artifacts wihtout waiting time (-W) there can be a time when
+    # the packages are not sync. This can result in duplicated artifacts,
+    # with the same name and version, until the system "republish it".
+    # To void that, a set, on the files, is used
+    folders_and_files = {k: sorted(set(v)) for k, v in sorted(folders_and_files.items())}
     logger.info("Subfolders and files: " + str(folders_and_files))
 
     return folders_and_files
 
 
 def copy_to_location(
-    package_version=None, package_name=None, new_package_version=None, new_repo=None, package_tags=None, repo=None
+    package_version=None,
+    package_name=None,
+    new_package_version=None,
+    new_package_name=None,
+    new_repo=None,
+    package_tags=None,
+    repo=None,
 ):
     """
     Function which copies all packages from Cloudsmith, with a specific `package_version`
@@ -334,6 +350,8 @@ def copy_to_location(
     :param package_name: `String` name of the package to download. Copy all files if this is missing.
     :param new_package_version: `String` new version representing the new theoretical path to upload
                           the packages to. If missing, keep the same version.
+    :param new_package_name: `String` new name for the package at the destination. If missing, use the
+                          original package name.
     :param new_repo: `String` new repository where to upload to. If missing, use the same repo.
     :param package_tags: `String` tags for the package(s) split by ','. If missing, inherit the
                    tags from the original package.
@@ -350,14 +368,15 @@ def copy_to_location(
     if not repo:
         raise SystemError("Cloudsmith_helper: repo is required to copy a package.")
 
+    # Optional parameters - use args as fallback if parameter not provided
+    if not package_name and args:
+        package_name = args.package_name
     if not new_package_version and args:
         new_package_version = args.new_package_version
     if not new_package_version:
         new_package_version = package_version
-
-    # Optional parameters - use args as fallback if parameter not provided
-    if not package_name and args:
-        package_name = args.package_name
+    if not new_package_name and args:
+        new_package_name = args.new_package_name
     if not new_repo and args:
         new_repo = args.new_repo
     if not new_repo:
@@ -382,21 +401,19 @@ def copy_to_location(
 
     for package in packages:
         if not package_tags:
-            package_tags = ",".join(package["tags"]["info"])
+            package_tags = ",".join(package.get("tags", {}).get("info", []))
 
-        package_name = package["name"]
-        if not new_package_version.endswith("/"):
-            package_name = new_package_version.split("/")[-1]
-            new_package_version = new_package_version.rsplit("/", 1)[0] + "/"
-            os.rename(package["name"], package_name)
+        # Use new_package_name if provided, otherwise keep the original package name
+        upload_name = new_package_name if new_package_name else package["name"]
+        if upload_name != package["name"]:
+            os.rename(package["name"], upload_name)
 
         logger.info(
-            f"Copy package: '{package_name}({package['name']})' with version: '{new_package_version}' in repo: '{new_repo}' with tags: '{package_tags}'"
+            f"Copy package: '{upload_name}({package['name']})' with version: '{new_package_version}' in repo: '{new_repo}' with tags: '{package_tags}'"
         )
-        deploy_to_location(package_name, new_package_version, package_tags, repo=new_repo)
+        deploy_to_location(upload_name, new_package_version, package_tags, repo=new_repo)
         # delete local files
-        command = ["rm", package_name]
-        subprocess.run(command, check=True)
+        os.remove(upload_name)
 
 
 def remove_item_from_location(package_version=None, package_name=None, repo=None):
@@ -404,8 +421,11 @@ def remove_item_from_location(package_version=None, package_name=None, repo=None
     Function which removes a package from Cloudsmith, with the specified version
     and/or `package_name`. Can be either a file or a directory.
 
-    :param package_version: `String` version(location) of the package to be removed. Optional.
-    :param package_name: `String` name of the package to be removed. Optional.
+    At least one of `package_version` or `package_name` must be provided.
+    Use "*" for either parameter to match all versions or names respectively.
+
+    :param package_version: `String` version(location) of the package to be removed. Use "*" to match all versions.
+    :param package_name: `String` name of the package to be removed. Use "*" to match all names.
     :param repo: `String` Cloudsmith repository name.
     """
     # Mandatory parameters - use args as fallback if parameter not provided
@@ -420,11 +440,18 @@ def remove_item_from_location(package_version=None, package_name=None, repo=None
     if not package_name and args:
         package_name = args.package_name
 
+    # At least one of package_version or package_name must be provided to prevent accidental deletion of all packages
+    if not package_version and not package_name:
+        raise SystemError(
+            "Cloudsmith_helper: At least one of package_version or package_name must be provided to remove items. "
+            "Use '*' to explicitly match all."
+        )
+
     # Build query based on provided parameters
     query = ""
-    if package_version:
+    if package_version and package_version != "*":
         query += f"version:{package_version}"
-    if package_name:
+    if package_name and package_name != "*":
         query += "+" if query else ""
         query += f"name:{package_name}"
 
@@ -445,6 +472,7 @@ def remove_item_from_location(package_version=None, package_name=None, repo=None
             if r.ok:
                 break
             if attempt < 2:
+                time.sleep(2)
                 logger.warning(f"Attempt {attempt + 1} failed with status {r.status_code}, retrying...")
             else:
                 raise SystemError(f"Request to the Cloudsmith API failed - DELETE {url} returned {r.status_code}")
@@ -482,6 +510,9 @@ def get_artifacts_from_location(package_version=None, package_name=None, keep_fo
     if not package_name and args:
         package_name = args.package_name
 
+    if not keep_folder_structure and args:
+        keep_folder_structure = args.keep_folder_structure
+
     if not package_version.startswith("^"):
         package_version = f"^{package_version}"
 
@@ -498,10 +529,15 @@ def get_artifacts_from_location(package_version=None, package_name=None, keep_fo
             # Remove API key from arguments for safe logging
             args_safe = [arg for i, arg in enumerate(arguments) if i != 2]
             raise SystemError(f"curl command failed with exit code {result.returncode}: {args_safe}")
-        if keep_folder_structure or args.keep_folder_structure:
-            arguments = ["mkdir", "-p", package["version"]]
+        if keep_folder_structure:
+            dir_to_create = (
+                os.path.dirname(package["version"])
+                if "." in os.path.basename(package["version"])
+                else package["version"]
+            )
+            arguments = ["mkdir", "-p", dir_to_create]
             subprocess.run(arguments, check=True)
-            arguments = ["mv", package["name"], package["version"]]
+            arguments = ["mv", package["name"], dir_to_create]
             subprocess.run(arguments, check=True)
     logger.info(f"{len(packages)} packages with version {package_version} have been downloaded")
     return packages
@@ -515,7 +551,7 @@ def deploy_to_location(local_path=None, package_version=None, package_tags=None,
 
     :param local_path: `String` relative (or absolute) path to the package to be uploaded to Cloudsmith.
     :param package_version: `String` package version representing the path where you would like to find the package
-                            if there would've been a folder structure. It defaults to `local_path` without the name itself.
+                            if there would've been a folder structure. Required.
     :param package_tags: `String` tags to be assigned to the package, separated by a `,`.
     :param repo: `String` Cloudsmith repository name.
     """
@@ -533,11 +569,11 @@ def deploy_to_location(local_path=None, package_version=None, package_tags=None,
 
     if not package_version and args:
         package_version = args.package_version
+    if not package_version:
+        raise SystemError("Cloudsmith_helper: package_version is required to deploy a package.")
+
     if not package_tags and args:
         package_tags = args.package_tags
-
-    if not package_version:
-        package_version = "/".join(local_path.split("/")[:-1])
 
     cloudsmith_repo = format_repo(repo)
     cmd = [
@@ -552,8 +588,7 @@ def deploy_to_location(local_path=None, package_version=None, package_tags=None,
         os.environ["CLOUDSMITH_API_KEY"],
     ]
 
-    if package_version:
-        cmd.extend(["--version", package_version])
+    cmd.extend(["--version", package_version])
     if package_tags:
         cmd.extend(["--tags", package_tags])
 
@@ -607,6 +642,10 @@ def get_item_properties(package_version=None, package_name=None, repo=None):
             f"Multiple packages found with the given parameters: version:{package_version} name:{package_name}!"
         )
 
+    logger.info(
+        f"Tags for package with version: '{package_version}' and name: '{package_name}' in repo: '{repo}': {packages[0]['tags']['info']}"
+    )
+
     return packages[0]["tags"]["info"]
 
 
@@ -633,7 +672,55 @@ def get_item_properties_as_dict(package_version=None, package_name=None, repo=No
                 tags_dict[key] = [value]
         else:
             tags_dict[tag] = None
+
+    logger.info(f"Tags as dict: {tags_dict}")
+
     return tags_dict
+
+
+def get_sha256_for_file(package_version=None, package_name=None, repo=None):
+    """
+    Function which gets the sha256 of a Cloudsmith package.
+
+    :param package_version: `String` version of the package representing the theoretical location.
+    :param package_name: `String` the name of the Cloudsmith package to retrieve tags from.
+    :param repo: `String` Cloudsmith repository name.
+    :return: `String` sha256 hash of the package
+    """
+    # Mandatory parameters - use args as fallback if parameter not provided
+    if not package_name and args:
+        package_name = args.package_name
+    if not package_name:
+        raise SystemError("Cloudsmith_helper: package_name is required to get item sha.")
+
+    if not repo and args:
+        repo = args.repo
+    if not repo:
+        raise SystemError("Cloudsmith_helper: repo is required to get item sha.")
+
+    if not package_version and args:
+        package_version = args.package_version
+    if not package_version:
+        raise SystemError("Cloudsmith_helper: package_version is required to get item sha.")
+
+    if not package_version.startswith("^"):
+        package_version = f"^{package_version}"
+    if not package_version.endswith("$"):
+        package_version += "$"
+
+    query = f"version:{package_version}+name:{package_name}"
+
+    packages = _get_all_packages(query, repo)
+    if not len(packages):
+        raise SystemError(
+            f"Cloudsmith_helper: No package was found with the given parameters: version:{package_version} name:{package_name}!"
+        )
+    if len(packages) > 1:
+        raise SystemError(
+            f"Cloudsmith_helper: Multiple packages found with the given parameters: version:{package_version} name:{package_name}!"
+        )
+
+    return packages[0]["checksum_sha256"]
 
 
 if __name__ == "__main__":
@@ -657,6 +744,7 @@ if __name__ == "__main__":
         help(deploy_to_location)
         help(get_item_properties)
         help(get_item_properties_as_dict)
+        help(get_sha256_for_file)
     else:
         try:
             logger.info(args.method)
