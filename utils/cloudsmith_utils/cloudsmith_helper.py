@@ -111,11 +111,21 @@ def set_arguments():
 
 
 ########################### Define Helper Methods ########################
-_packages_cache = {}
+PACKAGE_CACHE = {}
 
 
 @log_on_exit
 def _get_all_packages(query, repo):
+    """
+    Function which fetches all packages matching a query from a Cloudsmith
+    repository. Results are cached per version query and pages are fetched in
+    parallel. If the query contains a '+name:' filter, it is applied locally
+    against the cached version results.
+
+    :param query: `String` Cloudsmith search query, optionally with a '+name:' filter.
+    :param repo: `String` Cloudsmith repository name.
+    :return: `List` of package dictionaries matching the query.
+    """
     # Cache: strip +name: from query, fetch all packages for that version,
     # then filter locally by name if needed.
     name_filter = None
@@ -124,17 +134,18 @@ def _get_all_packages(query, repo):
         version_query, name_filter = query.split("+name:", 1)
 
     cache_key = (version_query, repo)
-    if cache_key in _packages_cache:
+    if cache_key in PACKAGE_CACHE:
         logger.debug(f"Cache hit for {version_query} in {repo}")
         if name_filter:
-            return [p for p in _packages_cache[cache_key] if re.search(name_filter, p["name"])]
-        return _packages_cache[cache_key]
+            return [p for p in PACKAGE_CACHE[cache_key] if re.search(name_filter, p["name"])]
+        return PACKAGE_CACHE[cache_key]
 
     page_size = 500
     cloudsmith_repo = format_repo(repo)
     base_url = f"{API_URL}/packages/{cloudsmith_repo}?query={version_query}&page_size={page_size}"
 
     # First request to get total count
+    r = None
     for attempt in range(3):
         r = session.get(f"{base_url}&page=1")
         if r.ok:
@@ -152,10 +163,10 @@ def _get_all_packages(query, repo):
     packages = json.loads(r.text)
 
     # Get number of pages from response headers
-    total_pages = int(r.headers.get("x-pagination-pagetotal"))
+    total_pages = int(r.headers.get("x-pagination-pagetotal", 1))
 
     if total_pages <= 1:
-        _packages_cache[cache_key] = packages
+        PACKAGE_CACHE[cache_key] = packages
         if name_filter:
             return [p for p in packages if re.search(name_filter, p["name"])]
         return packages
@@ -165,6 +176,7 @@ def _get_all_packages(query, repo):
         Function which fetches packages from one page.
         """
         url = f"{base_url}&page={page}"
+        resp = None
         for attempt in range(3):
             resp = session.get(url)
             if resp.ok:
@@ -186,7 +198,7 @@ def _get_all_packages(query, repo):
         for future in as_completed(futures):
             packages.extend(future.result())
 
-    _packages_cache[cache_key] = packages
+    PACKAGE_CACHE[cache_key] = packages
     if name_filter:
         return [p for p in packages if re.search(name_filter, p["name"])]
     return packages
