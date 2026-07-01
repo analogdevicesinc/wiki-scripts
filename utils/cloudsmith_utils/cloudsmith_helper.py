@@ -11,11 +11,12 @@ import argparse
 import json
 import logging
 import os
-from pathlib import PurePosixPath
-import requests
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import PurePosixPath
+
+import requests
 
 ########################### Global Vars Instantiation ####################
 API_URL = "https://api.cloudsmith.io/v1"
@@ -62,17 +63,24 @@ def set_arguments():
     parser = argparse.ArgumentParser(
         prog="Cloudsmith Helper Script",
         description="This is a helper script for interacting with the Cloudsmith server. "
-                    "Required environmental variables: CLOUDSMITH_API_KEY.",
+        "Required environmental variables: CLOUDSMITH_API_KEY.",
         epilog="Common error codes: 400: Bad Request, 401: Unauthorized, 403: Forbidden, 404: Not Found, 422: Unprocess Entity"
-               "https://docs.cloudsmith.com/api/error-handling")
-    parser.add_argument('--method', help="Method to invoke from this script.")
-    parser.add_argument('--package_version', help="The version of the package, it is the location where you expect to find the package in a folder structure.")
-    parser.add_argument('--package_name', help="The name of the package.")
-    parser.add_argument('--package_tags', help="List of tags for a package separated by a `,`.")
-    parser.add_argument('--local_path', help="Local path of a package to be uploaded to Cloudsmith.")
-    parser.add_argument('--new_package_version', help="New package version used to copy to another location.")
-    parser.add_argument('--new_repo', help="Name of a new repository to copy a package to.")
-    parser.add_argument('--repo', help="Name of the Cloudsmith repositories to perform the actions.", required=True)
+        "https://docs.cloudsmith.com/api/error-handling",
+    )
+    parser.add_argument("--method", help="Method to invoke from this script.")
+    parser.add_argument(
+        "--package_version",
+        help="The version of the package, it is the location where you expect to find the package in a folder structure.",
+    )
+    parser.add_argument("--package_name", help="The name of the package.")
+    parser.add_argument("--package_tags", help="List of tags for a package separated by a `,`.")
+    parser.add_argument("--local_path", help="Local path of a package to be uploaded to Cloudsmith.")
+    parser.add_argument("--new_package_version", help="New package version used to copy to another location.")
+    parser.add_argument("--new_repo", help="Name of a new repository to copy a package to.")
+    parser.add_argument("--repo", help="Name of the Cloudsmith repositories to perform the actions.", required=True)
+    parser.add_argument(
+        "--keep_folder_structure", action="store_true", help="Recreate folder structure based on package version."
+    )
     return parser.parse_args()
 
 
@@ -188,7 +196,15 @@ def get_subfolders(package_version=None, repo=None):
 
     packages = _get_all_packages(f"version:{enhance_package_version}", repo)
 
-    folders = sorted(list(set(p.parts[0] for package in packages if (p := PurePosixPath(package["version"]).relative_to(package_version)).parts)))
+    folders = sorted(
+        list(
+            set(
+                p.parts[0]
+                for package in packages
+                if (p := PurePosixPath(package["version"]).relative_to(package_version)).parts
+            )
+        )
+    )
     logger.info("Subfolders: " + str(folders))
 
     return folders
@@ -227,6 +243,7 @@ def get_files(package_version=None, repo=None):
 
     return files
 
+
 def get_folder_structure(package_version=None, repo=None):
     """
     Function which returns the folder structure present in Cloudsmith, based
@@ -256,7 +273,7 @@ def get_folder_structure(package_version=None, repo=None):
 
     packages = _get_all_packages(f"version:{package_version}", repo)
 
-    folders = sorted(list(set(package["version"][len(package_version) - 1:] for package in packages)))
+    folders = sorted(list(set(package["version"][len(package_version) - 1 :] for package in packages)))
     logger.info("Subfolders: " + str(folders))
 
     return folders
@@ -293,7 +310,7 @@ def get_folder_and_files_structure(package_version=None, repo=None):
 
     folders_and_files = {}
     for package in packages:
-        relative_path = package["version"][len(package_version) - 1:]
+        relative_path = package["version"][len(package_version) - 1 :]
         if relative_path not in folders_and_files:
             folders_and_files[relative_path] = []
         folders_and_files[relative_path].append(package["filename"])
@@ -304,7 +321,9 @@ def get_folder_and_files_structure(package_version=None, repo=None):
     return folders_and_files
 
 
-def copy_to_location(package_version=None, package_name=None, new_package_version=None, new_repo=None, package_tags=None, repo=None):
+def copy_to_location(
+    package_version=None, package_name=None, new_package_version=None, new_repo=None, package_tags=None, repo=None
+):
     """
     Function which copies all packages from Cloudsmith, with a specific `package_version`
     to another location with a different `new_package_version`. The copying is done
@@ -350,24 +369,30 @@ def copy_to_location(package_version=None, package_name=None, new_package_versio
         package_version = f"^{package_version}"
 
     if package_version.endswith("/") and not package_name and not new_package_version.endswith("/"):
-        raise SystemError("Cloudsmith_helper: If the source package_version is a folder (ends with '/'), the new_package_version must also be a folder (end with '/').")
+        raise SystemError(
+            "Cloudsmith_helper: If the source package_version is a folder (ends with '/'), the new_package_version must also be a folder (end with '/')."
+        )
 
-    logger.info(f"Copying packages from version: '{package_version}' in repo: '{repo}' to version: '{new_package_version}' in repo: '{new_repo}'")
+    logger.info(
+        f"Copying packages from version: '{package_version}' in repo: '{repo}' to version: '{new_package_version}' in repo: '{new_repo}'"
+    )
 
     # Download packages
     packages = get_artifacts_from_location(package_version, package_name, repo=repo)
 
     for package in packages:
         if not package_tags:
-            package_tags = ','.join(package['tags']['info'])
+            package_tags = ",".join(package["tags"]["info"])
 
-        package_name = package['name']
+        package_name = package["name"]
         if not new_package_version.endswith("/"):
             package_name = new_package_version.split("/")[-1]
             new_package_version = new_package_version.rsplit("/", 1)[0] + "/"
-            os.rename(package['name'], package_name)
+            os.rename(package["name"], package_name)
 
-        logger.info(f"Copy package: '{package_name}({package['name']})' with version: '{new_package_version}' in repo: '{new_repo}' with tags: '{package_tags}'")
+        logger.info(
+            f"Copy package: '{package_name}({package['name']})' with version: '{new_package_version}' in repo: '{new_repo}' with tags: '{package_tags}'"
+        )
         deploy_to_location(package_name, new_package_version, package_tags, repo=new_repo)
         # delete local files
         command = ["rm", package_name]
@@ -404,12 +429,15 @@ def remove_item_from_location(package_version=None, package_name=None, repo=None
         query += f"name:{package_name}"
 
     cloudsmith_repo = format_repo(repo)
-    logger.info(f"Package(s) {(f'with name {package_name}' if package_name else '')} {(f'with version {package_version}' if package_version else '')} from repo {cloudsmith_repo} will be deleted")
+    logger.info(
+        f"Package(s) {(f'with name {package_name}' if package_name else '')} {(f'with version {package_version}' if package_version else '')} from repo {cloudsmith_repo} will be deleted"
+    )
     packages = _get_all_packages(query, repo)
     if not packages:
         logger.info("No packages found to delete.")
         return
-    for package in packages:
+
+    def delete_package(package):
         logger.info(f"Deleting package {package['name']} with identifier {package['identifier_perm']}")
         url = f"{API_URL}/packages/{cloudsmith_repo}/{package['identifier_perm']}"
         for attempt in range(3):
@@ -422,15 +450,20 @@ def remove_item_from_location(package_version=None, package_name=None, repo=None
                 raise SystemError(f"Request to the Cloudsmith API failed - DELETE {url} returned {r.status_code}")
         logger.info(f"Package {package['name']} with identifier {package['identifier_perm']} was deleted")
 
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(delete_package, package): package for package in packages}
+        for future in as_completed(futures):
+            future.result()
 
-def get_artifacts_from_location(package_version=None, package_name=None, folder_structure=False, repo=None):
+
+def get_artifacts_from_location(package_version=None, package_name=None, keep_folder_structure=False, repo=None):
     """
     Function which downloads artifacts from Cloudsmith, that match the `package_version`.
-    The `folder_structure` can be recreated based on the `package_version`.
+    The `keep_folder_structure` can be recreated based on the `package_version`.
 
     :param package_version: `String` version(location) of the package(s) to be downloaded.
     :param package_name: `String` name of the package to download. If missing, all packages matching the version will be downloaded.
-    :param folder_structure: `Bool` specify if the folder structure should be recreated. Defaults to False.
+    :param keep_folder_structure: `Bool` specify if the folder structure should be recreated. Defaults to False.
     :param repo: `String` Cloudsmith repository name.
     :return: `List` of the packages that were downloaded.
     """
@@ -459,16 +492,16 @@ def get_artifacts_from_location(package_version=None, package_name=None, folder_
     packages = _get_all_packages(query, repo)
 
     for package in packages:
-        arguments = ["curl", "-H", f"X-Api-Key: {os.environ['CLOUDSMITH_API_KEY']}", "-1LfO", package['cdn_url']]
+        arguments = ["curl", "-H", f"X-Api-Key: {os.environ['CLOUDSMITH_API_KEY']}", "-1LfO", package["cdn_url"]]
         result = subprocess.run(arguments, capture_output=True)
         if result.returncode != 0:
             # Remove API key from arguments for safe logging
             args_safe = [arg for i, arg in enumerate(arguments) if i != 2]
             raise SystemError(f"curl command failed with exit code {result.returncode}: {args_safe}")
-        if folder_structure:
-            arguments = ["mkdir", "-p", package['version']]
+        if keep_folder_structure or args.keep_folder_structure:
+            arguments = ["mkdir", "-p", package["version"]]
             subprocess.run(arguments, check=True)
-            arguments = ["mv", package['name'], package['version']]
+            arguments = ["mv", package["name"], package["version"]]
             subprocess.run(arguments, check=True)
     logger.info(f"{len(packages)} packages with version {package_version} have been downloaded")
     return packages
@@ -504,10 +537,20 @@ def deploy_to_location(local_path=None, package_version=None, package_tags=None,
         package_tags = args.package_tags
 
     if not package_version:
-        package_version = '/'.join(local_path.split("/")[:-1])
+        package_version = "/".join(local_path.split("/")[:-1])
 
     cloudsmith_repo = format_repo(repo)
-    cmd = ["cloudsmith", "push", "raw", "-SW", "--republish", cloudsmith_repo, local_path, "-k", os.environ["CLOUDSMITH_API_KEY"]]
+    cmd = [
+        "cloudsmith",
+        "push",
+        "raw",
+        "-SW",
+        "--republish",
+        cloudsmith_repo,
+        local_path,
+        "-k",
+        os.environ["CLOUDSMITH_API_KEY"],
+    ]
 
     if package_version:
         cmd.extend(["--version", package_version])
@@ -516,7 +559,9 @@ def deploy_to_location(local_path=None, package_version=None, package_tags=None,
 
     output = subprocess.run(cmd, capture_output=True)
     if output.returncode == 0:
-        logger.info(f"Package successfully uploaded package:{local_path} version:{package_version} package_tags:{package_tags}")
+        logger.info(
+            f"Package successfully uploaded package:{local_path} version:{package_version} package_tags:{package_tags}"
+        )
     else:
         # Remove -k and API key from command for safe logging
         cmd_safe = [arg for i, arg in enumerate(cmd) if arg != "-k" and (i == 0 or cmd[i - 1] != "-k")]
@@ -554,11 +599,15 @@ def get_item_properties(package_version=None, package_name=None, repo=None):
 
     packages = _get_all_packages(query, repo)
     if not len(packages):
-        raise SystemError(f"No package was found with the given parameters: version:{package_version} name:{package_name}!")
+        raise SystemError(
+            f"No package was found with the given parameters: version:{package_version} name:{package_name}!"
+        )
     if len(packages) > 1:
-        raise SystemError(f"Multiple packages found with the given parameters: version:{package_version} name:{package_name}!")
+        raise SystemError(
+            f"Multiple packages found with the given parameters: version:{package_version} name:{package_name}!"
+        )
 
-    return packages[0]['tags']['info']
+    return packages[0]["tags"]["info"]
 
 
 def get_item_properties_as_dict(package_version=None, package_name=None, repo=None):
@@ -576,8 +625,8 @@ def get_item_properties_as_dict(package_version=None, package_name=None, repo=No
     tags = get_item_properties(package_version, package_name, repo)
     tags_dict = {}
     for tag in tags:
-        if '-' in tag:
-            key, value = tag.split('-', 1)
+        if "-" in tag:
+            key, value = tag.split("-", 1)
             if key in tags_dict:
                 tags_dict[key].append(value)
             else:
@@ -595,7 +644,7 @@ if __name__ == "__main__":
 
     if args.method is None:
         # Set pager to cat so that scrolling is not enabled
-        os.environ['PAGER'] = 'cat'
+        os.environ["PAGER"] = "cat"
         logger.info("\nWARNING: Method argument is missing!")
         help(check_path)
         help(get_subfolders)
