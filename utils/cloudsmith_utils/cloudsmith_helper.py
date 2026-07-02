@@ -169,6 +169,11 @@ def _set_arguments():
     parent_args_parser.add_argument(
         "--keep_folder_structure", action="store_true", help="Recreate folder structure based on package version."
     )
+    parent_args_parser.add_argument(
+        "--no_rel_path",
+        action="store_true",
+        help="Do not append relative path of local file to the package version.",
+    )
     parent_args_parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
 
     parser = argparse.ArgumentParser(
@@ -644,6 +649,53 @@ def deploy_to_location(local_path=None, package_version=None, package_tags=None,
         raise RuntimeError(
             f"cmd: {cmd} failed with exit code {output.returncode}! stderr: {output.stderr.decode('utf-8')} stdout: {output.stdout.decode('utf-8')}"
         )
+
+
+@_log_on_exit
+def upload_to_location(local_path=None, package_version=None, package_tags=None, no_rel_path=False, repo=None):
+    """
+    Upload files or directories to Cloudsmith.
+
+    If `local_path` is a directory, all files within it are uploaded recursively.
+    When `no_rel_path` is False, the file's directory path relative to `local_path`
+    is appended to `package_version`.
+
+    :param local_path: `String` path to a file or directory to upload.
+    :param package_version: `String` version (virtual folder path) for the upload.
+    :param package_tags: `String` tags for the package(s), separated by a `,`.
+    :param no_rel_path: `Bool` if True, do not append relative path to version. Defaults to False.
+    :param repo: `String` Cloudsmith repository name.
+    """
+    local_path = _resolve_param(local_path, "local_path", context="to upload.")
+    repo = _resolve_param(repo, "repo", context="to upload.")
+    package_version = _resolve_param(package_version, "package_version", default="")
+    package_tags = _resolve_param(package_tags, "package_tags")
+    no_rel_path = _resolve_param(no_rel_path, "no_rel_path")
+
+    if package_version and not package_version.endswith("/"):
+        package_version += "/"
+
+    local_path = os.path.abspath(local_path) if "/" in local_path else local_path
+
+    # Collect files to upload
+    files_to_upload = []
+    if os.path.isdir(local_path):
+        for dirpath, _, filenames in os.walk(local_path):
+            for fname in filenames:
+                files_to_upload.append(os.path.join(dirpath, fname))
+    elif os.path.isfile(local_path):
+        files_to_upload.append(local_path)
+    else:
+        raise RuntimeError(f"Cloudsmith_helper: local_path does not exist: {local_path}")
+
+    for file_path in files_to_upload:
+        if no_rel_path:
+            file_version = package_version
+        else:
+            file_version = package_version + os.path.dirname(file_path)
+
+        logger.info(f"Uploading {file_path} to adi/{repo} with version '{file_version}'")
+        deploy_to_location(file_path, file_version, package_tags, repo=repo)
 
 
 @_log_on_exit
