@@ -129,9 +129,13 @@ FSBL_PATH="$BUILD_DIR/build/sdk/hw0/export/hw0/sw/hw0/boot/fsbl.elf"
 SYSTEM_TOP_BIT_PATH="$BUILD_DIR/build/sdk/hw0/hw/system_top.bit"
 PMUFW_PATH="$BUILD_DIR/build/sdk/hw0/export/hw0/sw/hw0/boot/pmufw.elf"
 
+### Create regs.init file required by the register initialization block to enable cache coherency
+echo ".set. 0xFF41A040 = 0x3;" > $OUTPUT_DIR/regs.init
+
 ### Create zynq.bif file used by bootgen
 echo "the_ROM_image:" > $OUTPUT_DIR/zynq.bif
 echo "{" >> $OUTPUT_DIR/zynq.bif
+echo "[init] ./regs.init" >> $OUTPUT_DIR/zynq.bif
 echo "[bootloader,destination_cpu=a53-0] fsbl.elf" >> $OUTPUT_DIR/zynq.bif
 echo "[pmufw_image] pmufw.elf" >> $OUTPUT_DIR/zynq.bif
 echo "[destination_device=pl] system_top.bit" >> $OUTPUT_DIR/zynq.bif
