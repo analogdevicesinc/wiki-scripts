@@ -19,7 +19,6 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import PurePosixPath
 
 import requests
 
@@ -28,9 +27,6 @@ API_URL = "https://api.cloudsmith.io/v1"
 
 if "CLOUDSMITH_API_KEY" not in os.environ:
     raise RuntimeError("Cloudsmith_helper: CLOUDSMITH_API_KEY variable is not exported.")
-
-session = requests.Session()
-session.headers.update({"X-Api-Key": os.environ["CLOUDSMITH_API_KEY"]})
 
 LOCAL_THREAD_STORAGE = threading.local()
 
@@ -53,23 +49,33 @@ def _get_session():
     return LOCAL_THREAD_STORAGE.session
 
 
-def _configure_logger(enable_logging=False, debug=False):
-    logger.setLevel(logging.INFO)
+def _configure_logger(enable_logging=False, debug=False, handler=None):
+    """
+    Configure this module's logger, replacing any existing handlers. Errors always emit
+    (ERROR is the quiet floor); the handler goes to stderr.
+
+    :param enable_logging: `Bool` when True, log at INFO; when False, only errors (ERROR level).
+    :param debug: `Bool` when True, log at DEBUG level (overrides enable_logging).
+    :param handler: `logging.Handler` external handler to attach; a caller can pass its own so
+                    both loggers share one formatter. If omitted, a default stderr handler is built.
+    """
+    if debug:
+        logger.setLevel(logging.DEBUG)
+    elif __name__ == "__main__" or enable_logging:
+        logger.setLevel(logging.INFO)
+    else:
+        logger.setLevel(logging.ERROR)  # quiet: errors only
 
     if logger.handlers:
         logger.handlers.clear()
 
-    if __name__ == "__main__" or enable_logging or debug:
-        handler = logging.StreamHandler(sys.stdout)
+    if handler is None:
+        handler = logging.StreamHandler()  # defaults to sys.stderr
         if debug:
-            logger.setLevel(logging.DEBUG)
             formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
         else:
-            logger.setLevel(logging.INFO)
             formatter = logging.Formatter("%(message)s")
         handler.setFormatter(formatter)
-    else:
-        handler = logging.FileHandler(os.devnull)
 
     logger.addHandler(handler)
 
@@ -192,31 +198,70 @@ def _set_arguments():
 PACKAGE_CACHE = {}
 
 
+def _strip_version_prefix(version, query_version):
+    """
+    Return the part of `version` that follows the folder prefix `query_version`.
+
+    Compared component by component, because a '*' matches a folder name of a
+    different length than itself. A leading '^' is implied and ignored.
+
+    :param version: `String` full package version, e.g. 'a/b/c/d/'.
+    :param query_version: `String` prefix to strip, e.g. '^a/*/'. This is what we query for.
+    :return: `String` remainder after the prefix, or `None` if it does not match.
+    """
+    base = query_version.lstrip("^").rstrip("/").split("/")
+    parts = version.split("/")
+    if len(parts) < len(base) or any(b not in ("*", p) for b, p in zip(base, parts)):
+        return None
+    return "/".join(parts[len(base):])
+
+
+def _filter_by_name(packages, name_filter):
+    """
+    Keep packages whose name contains `name_filter` as a literal substring.
+
+    The filter comes from a '+name:' query fragment and is always a filename,
+    so it is escaped - '.' and '+' in a filename are not regex metacharacters.
+
+    :param packages: `List` of package dictionaries.
+    :param name_filter: `String` literal substring to match, or `None`/empty to
+                        keep every package unfiltered.
+    :return: `List` of matching packages.
+    """
+    if not name_filter:
+        return packages
+    pattern = re.escape(name_filter)
+    return [p for p in packages if re.search(pattern, p["name"])]
+
+
 @_log_on_exit
 def _get_all_packages(query, repo):
     """
     Function which fetches all packages matching a query from a Cloudsmith
     repository. Results are cached per version query and pages are fetched in
-    parallel. If the query contains a '+name:' filter, it is applied locally
-    against the cached version results.
+    parallel. If the query contains a '+name:' filter, only that filter is applied
+    locally against the cached results; the rest of the query stays server-side and
+    is part of the cache key.
 
     :param query: `String` Cloudsmith search query, optionally with a '+name:' filter.
     :param repo: `String` Cloudsmith repository name.
     :return: `List` of package dictionaries matching the query.
     """
-    # Cache: strip +name: from query, fetch all packages for that version,
-    # then filter locally by name if needed.
+    # Cache: strip the +name: filter from the query, fetch all packages for what remains,
+    # then filter locally by name. Query parts are joined with '+', so the name value ends
+    # at the next '+'; everything after it stays in the server query. A '+' inside the name
+    # itself (legal in Debian names) would split early - no caller produces one.
     name_filter = None
     version_query = query
     if "+name:" in query:
-        version_query, name_filter = query.split("+name:", 1)
+        head, _, rest = query.partition("+name:")
+        name_filter, _, tail = rest.partition("+")
+        version_query = f"{head}+{tail}" if tail else head
 
     cache_key = (version_query, repo)
     if cache_key in PACKAGE_CACHE:
         logger.debug(f"Cache hit for {version_query} in {repo}")
-        if name_filter:
-            return [p for p in PACKAGE_CACHE[cache_key] if re.search(name_filter, p["name"])]
-        return PACKAGE_CACHE[cache_key]
+        return _filter_by_name(PACKAGE_CACHE[cache_key], name_filter)
 
     page_size = 500
     cloudsmith_repo = _format_repo(repo)
@@ -225,7 +270,7 @@ def _get_all_packages(query, repo):
     # First request to get total count
     r = None
     for attempt in range(3):
-        r = session.get(f"{base_url}&page=1")
+        r = _get_session().get(f"{base_url}&page=1")
         if r.ok:
             break
         if r.status_code == 404 and json.loads(r.text).get("detail") == "Invalid page.":
@@ -245,9 +290,7 @@ def _get_all_packages(query, repo):
 
     if total_pages <= 1:
         PACKAGE_CACHE[cache_key] = packages
-        if name_filter:
-            return [p for p in packages if re.search(name_filter, p["name"])]
-        return packages
+        return _filter_by_name(packages, name_filter)
 
     def fetch_page(page):
         """
@@ -277,9 +320,7 @@ def _get_all_packages(query, repo):
             packages.extend(future.result())
 
     PACKAGE_CACHE[cache_key] = packages
-    if name_filter:
-        return [p for p in packages if re.search(name_filter, p["name"])]
-    return packages
+    return _filter_by_name(packages, name_filter)
 
 
 @_log_on_exit
@@ -300,12 +341,13 @@ def check_path(package_version=None, package_name=None, repo=None):
     repo = _resolve_param(repo, "repo", context="to check if a path exists.")
     package_name = _resolve_param(package_name, "package_name", context="to check if a path exists.")
 
+    cloudsmith_repo = _format_repo(repo)
     package_version = package_version.replace("/", "-")
-    url = f"https://dl.cloudsmith.io/basic/adi/{repo}/raw/versions/{package_version}/{package_name}"
+    url = f"https://dl.cloudsmith.io/basic/{cloudsmith_repo}/raw/versions/{package_version}/{package_name}"
 
     logger.info(f"Checking path existence for version: '{package_version}' and file'{package_name}' in repo: '{repo}'")
 
-    response = session.head(url)
+    response = _get_session().head(url)
     if response.status_code == 200:
         return True
     logger.info(f"Response status code: {response.status_code} for URL: {url}.")
@@ -326,25 +368,22 @@ def get_subfolders(package_version=None, repo=None):
 
     logger.info(f"Getting subfolders for version: '{package_version}' in repo: '{repo}'")
 
-    enhance_package_version = package_version
     if not package_version.startswith("^"):
-        enhance_package_version = f"^{package_version}"
+        package_version = f"^{package_version}"
     if not package_version.endswith("/"):
-        enhance_package_version += "/"
+        package_version += "/"
 
-    packages = _get_all_packages(f"version:{enhance_package_version}", repo)
+    packages = _get_all_packages(f"version:{package_version}", repo)
 
     # Extract unique first-level subfolder names from each package's version path.
-    # For each package, compute the relative path from base package_version, then take the
-    # first component as the subfolder name. Packages at the root level (no parts) are filtered out.
-    # Example: package_version="hdl/main", package["version"]="hdl/main/boot_files" -> subfolder="boot_files"
+    # For each package, strip the matched base prefix, then take the first component as the
+    # subfolder name. Packages at the root level (empty remainder) are filtered out.
+    # Example: package_version="^hdl/main/", package["version"]="hdl/main/boot_files" -> subfolder="boot_files"
     folders = sorted(
-        list(
-            set(
-                p.parts[0]
-                for package in packages
-                if (p := PurePosixPath(package["version"]).relative_to(package_version)).parts
-            )
+        set(
+            remainder.split("/", 1)[0]
+            for package in packages
+            if (remainder := _strip_version_prefix(package["version"], package_version))
         )
     )
     logger.info("Subfolders: " + str(folders))
@@ -402,7 +441,13 @@ def get_folder_structure(package_version=None, repo=None):
 
     packages = _get_all_packages(f"version:{package_version}", repo)
 
-    folders = sorted(list(set(package["version"][len(package_version) - 1 :] for package in packages)))
+    folders = sorted(
+        set(
+            remainder
+            for package in packages
+            if (remainder := _strip_version_prefix(package["version"], package_version)) is not None
+        )
+    )
     logger.info("Subfolders: " + str(folders))
 
     return folders
@@ -431,7 +476,9 @@ def get_folder_and_files_structure(package_version=None, repo=None):
 
     folders_and_files = {}
     for package in packages:
-        relative_path = package["version"][len(package_version) - 1 :]
+        relative_path = _strip_version_prefix(package["version"], package_version)
+        if relative_path is None:
+            continue
         if relative_path not in folders_and_files:
             folders_and_files[relative_path] = []
         folders_and_files[relative_path].append(package["filename"])
@@ -498,7 +545,7 @@ def copy_to_location(
 
     for package in packages:
         if not package_tags:
-            package_tags = ",".join(package.get("tags", {}).get("info", []))
+            tags = package_tags or ",".join(package.get("tags", {}).get("info", []))
 
         # Use new_package_name if provided, otherwise keep the original package name
         upload_name = new_package_name if new_package_name else package["name"]
@@ -506,9 +553,9 @@ def copy_to_location(
             os.rename(package["name"], upload_name)
 
         logger.info(
-            f"Copy package: '{upload_name}({package['name']})' with version: '{new_package_version}' in repo: '{new_repo}' with tags: '{package_tags}'"
+            f"Copy package: '{upload_name}({package['name']})' with version: '{new_package_version}' in repo: '{new_repo}' with tags: '{tags}'"
         )
-        deploy_to_location(upload_name, new_package_version, package_tags, repo=new_repo)
+        deploy_to_location(upload_name, new_package_version, tags, repo=new_repo)
         # delete local files
         os.remove(upload_name)
 
@@ -594,7 +641,7 @@ def get_artifacts_from_location(package_version=None, package_name=None, keep_fo
 
     for package in packages:
         logger.info(f"Downloading package: {package['name']} from {package['cdn_url']}")
-        response = session.get(package["cdn_url"])
+        response = _get_session().get(package["cdn_url"])
         if response.status_code != 200:
             raise RuntimeError(
                 f"Download failed for {package['name']} from {package['cdn_url']}. Status code: {response.status_code}"
@@ -610,6 +657,52 @@ def get_artifacts_from_location(package_version=None, package_name=None, keep_fo
             os.makedirs(dir_to_create, exist_ok=True)
             os.rename(package["name"], os.path.join(dir_to_create, package["name"]))
     logger.info(f"{len(packages)} packages with version {package_version} have been downloaded")
+    return packages
+
+
+@_log_on_exit
+def get_artifacts_to_dir(package_version=None, dest_dir=None, repo=None, package_name=None):
+    """
+    Download every file under a version prefix into `dest_dir`, recreating the subfolder
+    layout relative to `package_version`. Writes to absolute paths under `dest_dir` (no reliance
+    on the cwd), so concurrent calls with distinct `dest_dir`s are safe.
+
+    :param package_version: `String` version prefix acting as the virtual folder to pull from.
+    :param dest_dir: `String` local directory to write files into (created if missing).
+    :param repo: `String` Cloudsmith repository name.
+    :param package_name: `String` optional single filename to fetch; if missing, all files
+                         under the prefix are downloaded.
+    :return: `List` of the packages that were downloaded.
+    """
+    package_version = _resolve_param(package_version, "package_version", context="to get artifacts.")
+    dest_dir = _resolve_param(dest_dir, "dest_dir", context="to get artifacts.")
+    repo = _resolve_param(repo, "repo", context="to get artifacts.")
+    package_name = _resolve_param(package_name, "package_name")
+
+    prefix = package_version if package_version.endswith("/") else package_version + "/"
+
+    query = f"version:^{prefix}"
+    if package_name:
+        query += f"+name:{package_name}"
+
+    packages = _get_all_packages(query, repo)
+
+    for package in packages:
+        # relative_dir: the package's version path with the shared prefix stripped off, so a
+        # file at "<prefix>zynqmp-common/" lands in "<dest_dir>/zynqmp-common/".
+        relative_dir = package["version"][len(prefix):].strip("/")
+        target_dir = os.path.join(dest_dir, relative_dir)
+        os.makedirs(target_dir, exist_ok=True)
+        target_path = os.path.join(target_dir, package["name"])
+        logger.info(f"Downloading package: {package['name']} from {package['cdn_url']} to {target_path}")
+        response = _get_session().get(package["cdn_url"])
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Download failed for {package['name']} from {package['cdn_url']}. Status code: {response.status_code}"
+            )
+        with open(target_path, "wb") as f:
+            f.write(response.content)
+    logger.info(f"{len(packages)} packages with version {prefix} have been downloaded to {dest_dir}")
     return packages
 
 
