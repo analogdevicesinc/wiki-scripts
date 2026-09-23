@@ -14,8 +14,10 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -29,6 +31,10 @@ if "CLOUDSMITH_API_KEY" not in os.environ:
     raise RuntimeError("Cloudsmith_helper: CLOUDSMITH_API_KEY variable is not exported.")
 
 LOCAL_THREAD_STORAGE = threading.local()
+
+# Armed by _install_signal_handlers() so parallel work can wind down cleanly. An Event
+# rather than a bool: worker threads read it while the signal handler writes it.
+_SHUTDOWN = threading.Event()
 
 
 def _get_session():
@@ -72,7 +78,10 @@ def _configure_logger(enable_logging=False, debug=False, handler=None):
     if handler is None:
         handler = logging.StreamHandler()  # defaults to sys.stderr
         if debug:
-            formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+            # threadName distinguishes the parallel upload workers from each other.
+            formatter = logging.Formatter(
+                "%(asctime)s %(levelname)s %(threadName)s %(message)s", datefmt="%H:%M:%S"
+            )
         else:
             formatter = logging.Formatter("%(message)s")
         handler.setFormatter(formatter)
@@ -110,6 +119,27 @@ _configure_logger()
 
 # Global args variable, will be set when running from command line
 args = None
+
+
+def _install_signal_handlers():
+    """
+    Bind SIGINT/SIGTERM to arm `_SHUTDOWN` so parallel work stops without a traceback.
+
+    Call this from `__main__` only: signal disposition is process-global, so installing
+    handlers at import time would override them for every script that imports this module
+    (e.g. create_boot_partition.py). A second signal raises SystemExit, though work already
+    handed to a worker still drains as the ThreadPoolExecutor closes.
+    """
+
+    def handler(signum, frame):
+        if _SHUTDOWN.is_set():
+            logger.error("Second signal received, exiting.")
+            sys.exit(1)
+        _SHUTDOWN.set()
+        logger.warning("Shutdown requested, waiting for in-flight work to finish...")
+
+    signal.signal(signal.SIGINT, handler)
+    signal.signal(signal.SIGTERM, handler)
 
 
 def _resolve_param(value, attr_name, default=None, context=None):
@@ -181,6 +211,8 @@ def _set_arguments():
         help="Do not append relative path of local file to the package version.",
     )
     parent_args_parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
+    parent_args_parser.add_argument("--max_workers", type=int, help="Maximum parallel uploads (default: 10).")
+    parent_args_parser.add_argument("--log_file", help="Local file where to save the logs, if no file is specified the logs will be printed in terminal.")
 
     parser = argparse.ArgumentParser(
         prog="Cloudsmith Helper Script",
@@ -196,6 +228,62 @@ def _set_arguments():
 
 ########################### Define Helper Methods ########################
 PACKAGE_CACHE = {}
+
+
+def _run_in_parallel(worker, items, action, max_workers, describe=str):
+    """
+    Run `worker` over `items` concurrently, reporting every failure rather than the first.
+
+    Unlike the fail-fast `future.result()` used for the API calls, a failing item does not
+    abandon the batch: the rest still run and the error names all of them at the end. Returns
+    each worker's result (completion order, not submission order), so it also serves as a
+    parallel map; side-effecting callers can ignore the return.
+
+    :param worker: `Callable` invoked with a single item; its return value is collected.
+    :param items: `List` of items to hand to `worker`.
+    :param action: `String` verb used in log lines and thread names, e.g. 'upload'.
+    :param max_workers: `Int` maximum items processed at once.
+    :param describe: `Callable` item -> `String` name for log lines. Defaults to `str`.
+    :return: `List` of the workers' return values, in completion order.
+    :raises RuntimeError: if any item failed.
+    :raises KeyboardInterrupt: if a shutdown signal arrived part-way through.
+    """
+    logger.info(f"Starting {action} of {len(items)} item(s) with {max_workers} parallel worker(s)")
+
+    results = []
+    failures = []
+    cancelled = 0
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=action) as executor:
+        futures = {}
+        for item in items:
+            if _SHUTDOWN.is_set():
+                cancelled += 1
+                continue
+            futures[executor.submit(worker, item)] = describe(item)
+
+        for future in as_completed(futures):
+            if _SHUTDOWN.is_set():
+                # The submit loop above builds the whole queue in microseconds, so this is
+                # where an interrupt actually bites. cancel() only succeeds on futures that
+                # have not started; running ones drain as the executor closes.
+                cancelled += sum(1 for pending in futures if pending.cancel())
+                break
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                logger.error(f"Failed to {action} {futures[future]}: {exc}")
+                failures.append((futures[future], exc))
+
+    logger.info(f"Finished {action}: {len(results)}/{len(items)} succeeded")
+
+    if failures:
+        summary = "\n".join(f"  - {name}: {exc}" for name, exc in failures)
+        raise RuntimeError(f"Cloudsmith_helper: {len(failures)} {action}(s) failed:\n{summary}")
+
+    if _SHUTDOWN.is_set():
+        raise KeyboardInterrupt(f"Cloudsmith_helper: interrupted, {cancelled} {action}(s) cancelled")
+
+    return results
 
 
 def _strip_version_prefix(version, query_version):
@@ -277,7 +365,7 @@ def _get_all_packages(query, repo):
             return []
         if attempt < 2:
             time.sleep(2)
-            logger.warning(f"Attempt {attempt + 1} failed with status {r.status_code}, retrying...")
+            logger.warning(f"Attempt {attempt + 1} failed to get packages with status {r.status_code}, retrying...")
         else:
             raise RuntimeError(
                 f"Request to the Cloudsmith API failed - {base_url}. Status code: {r.status_code}. Status message: {r.text}"
@@ -306,7 +394,7 @@ def _get_all_packages(query, repo):
                 return []
             if attempt < 2:
                 time.sleep(2)
-                logger.warning(f"Attempt {attempt + 1} failed with status {resp.status_code}, retrying...")
+                logger.warning(f"Attempt {attempt + 1} failed to get packages with status {resp.status_code}, retrying...")
             else:
                 raise RuntimeError(
                     f"Request failed - {url}. Status code: {resp.status_code}. Status message: {resp.text}"
@@ -314,10 +402,8 @@ def _get_all_packages(query, repo):
         return json.loads(resp.text)
 
     # Fetch remaining pages in parallel
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(fetch_page, page): page for page in range(2, total_pages + 1)}
-        for future in as_completed(futures):
-            packages.extend(future.result())
+    for page_packages in _run_in_parallel(fetch_page, list(range(2, total_pages + 1)), "fetch", 10):
+        packages.extend(page_packages)
 
     PACKAGE_CACHE[cache_key] = packages
     return _filter_by_name(packages, name_filter)
@@ -502,12 +588,13 @@ def copy_to_location(
     new_repo=None,
     package_tags=None,
     repo=None,
+    max_workers=None,
 ):
     """
     Copy packages from one version path to another.
 
-    Downloads packages locally first, then re-uploads with the `new_package_version`
-    to a `new_repo` or the same repository.
+    Downloads packages locally first, then re-uploads them in parallel with the
+    `new_package_version` to a `new_repo` or the same repository.
 
     :param package_version: `String` version representing theoretical path of the packages.
     :param package_name: `String` name of the package to download. Copy all files if this is missing.
@@ -519,6 +606,8 @@ def copy_to_location(
     :param package_tags: `String` tags for the package(s) split by ','. If missing, inherit the
                    tags from the original package.
     :param repo: `String` Cloudsmith repository name.
+    :param max_workers: `Int` maximum parallel copies. Defaults to 10.
+    :raises RuntimeError: if any package fails to copy.
     """
     package_version = _resolve_param(package_version, "package_version", context="to copy a package.")
     repo = _resolve_param(repo, "repo", context="to copy a package.")
@@ -527,6 +616,7 @@ def copy_to_location(
     new_package_name = _resolve_param(new_package_name, "new_package_name")
     new_repo = _resolve_param(new_repo, "new_repo", default=repo)
     package_tags = _resolve_param(package_tags, "package_tags")
+    max_workers = _resolve_param(max_workers, "max_workers", default=10)
 
     if not package_version.startswith("^"):
         package_version = f"^{package_version}"
@@ -543,21 +633,28 @@ def copy_to_location(
     # Download packages
     packages = get_artifacts_from_location(package_version, package_name, repo=repo)
 
-    for package in packages:
-        if not package_tags:
-            tags = package_tags or ",".join(package.get("tags", {}).get("info", []))
+    if not packages:
+        logger.info("No packages found to copy.")
+        return
 
-        # Use new_package_name if provided, otherwise keep the original package name
-        upload_name = new_package_name if new_package_name else package["name"]
-        if upload_name != package["name"]:
-            os.rename(package["name"], upload_name)
+    def copy_one(package):
+        # Inherit the source package's tags unless the caller supplied their own.
+        tags = package_tags or ",".join(package.get("tags", {}).get("info", []))
+        upload_name = new_package_name or package["name"]
 
-        logger.info(
-            f"Copy package: '{upload_name}({package['name']})' with version: '{new_package_version}' in repo: '{new_repo}' with tags: '{tags}'"
-        )
-        deploy_to_location(upload_name, new_package_version, tags, repo=new_repo)
-        # delete local files
-        os.remove(upload_name)
+        # Own directory per package: with new_package_name set they all rename to the same
+        # filename and would race. dir="." keeps the rename on one filesystem.
+        with tempfile.TemporaryDirectory(dir=".") as staging:
+            staged = os.path.join(staging, upload_name)
+            os.rename(package["name"], staged)
+            logger.info(
+                f"Copy package: '{upload_name}({package['name']})' with version: "
+                f"'{new_package_version}' in repo: '{new_repo}' with tags: '{tags}'"
+            )
+            deploy_to_location(staged, new_package_version, tags, repo=new_repo)
+        # Leaving the context removes the staging dir, and the local file with it.
+
+    _run_in_parallel(copy_one, packages, "copy", max_workers, describe=lambda p: p["name"])
 
 
 @_log_on_exit
@@ -602,15 +699,12 @@ def remove_item_from_location(package_version=None, package_name=None, repo=None
                 break
             if attempt < 2:
                 time.sleep(2)
-                logger.warning(f"Attempt {attempt + 1} failed with status {r.status_code}, retrying...")
+                logger.warning(f"Attempt {attempt + 1} failed to delete package {package['name']} with status {r.status_code}, retrying...")
             else:
                 raise RuntimeError(f"Request to the Cloudsmith API failed - DELETE {url} returned {r.status_code}")
         logger.info(f"Package {package['name']} with identifier {package['identifier_perm']} was deleted")
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(delete_package, package): package for package in packages}
-        for future in as_completed(futures):
-            future.result()
+    _run_in_parallel(delete_package, packages, "delete", 10, describe=lambda p: p["name"])
 
 
 @_log_on_exit
@@ -711,6 +805,9 @@ def deploy_to_location(local_path=None, package_version=None, package_tags=None,
     """
     Upload a raw package to Cloudsmith.
 
+    Retries up to 3 times with a 2s pause, and caps each attempt at 300s so a stalled
+    push cannot hold a worker during a parallel upload.
+
     Requires the `cloudsmith-cli` tool to be installed.
     This can be done via `pip` - `python -m pip install cloudsmith-cli`
 
@@ -726,6 +823,10 @@ def deploy_to_location(local_path=None, package_version=None, package_tags=None,
     package_version = _resolve_param(package_version, "package_version", context="to deploy a package.")
     package_tags = _resolve_param(package_tags, "package_tags")
 
+    # Wall-clock cap on a single push. Without it a stalled push holds a
+    # ThreadPoolExecutor worker forever and the parallel upload never returns.
+    push_timeout_seconds = 300
+
     cloudsmith_repo = _format_repo(repo)
     cmd = ["cloudsmith", "push", "raw", "-SW", "--republish", cloudsmith_repo, local_path]
 
@@ -733,42 +834,63 @@ def deploy_to_location(local_path=None, package_version=None, package_tags=None,
     if package_tags:
         cmd.extend(["--tags", package_tags])
 
-    output = subprocess.run(cmd, capture_output=True)
-    if output.returncode == 0:
-        logger.info(
-            f"Package successfully uploaded package:{local_path} version:{package_version} package_tags:{package_tags}"
-        )
-    else:
-        raise RuntimeError(
-            f"cmd: {cmd} failed with exit code {output.returncode}! stderr: {output.stderr.decode('utf-8')} stdout: {output.stdout.decode('utf-8')}"
-        )
+    for attempt in range(3):
+        try:
+            output = subprocess.run(cmd, capture_output=True, timeout=push_timeout_seconds)
+        except subprocess.TimeoutExpired:
+            reason = f"timed out after {push_timeout_seconds}s"
+        else:
+            if output.returncode == 0:
+                logger.info(
+                    f"Package successfully uploaded package:{local_path} version:{package_version} package_tags:{package_tags}"
+                )
+                return
+            reason = (
+                f"exit code {output.returncode}! stderr: {output.stderr.decode('utf-8')} "
+                f"stdout: {output.stdout.decode('utf-8')}"
+            )
+
+        if attempt < 2:
+            time.sleep(2)
+            logger.warning(f"Attempt {attempt + 1} for {local_path} failed with {reason}, retrying...")
+        else:
+            raise RuntimeError(f"cmd: {cmd} failed with {reason}")
 
 
 @_log_on_exit
-def upload_to_location(local_path=None, package_version=None, package_tags=None, no_rel_path=False, repo=None):
+def upload_to_location(
+    local_path=None, package_version=None, package_tags=None, no_rel_path=False, repo=None, max_workers=None
+):
     """
-    Upload files or directories to Cloudsmith.
+    Upload files or directories to Cloudsmith, in parallel.
 
     If `local_path` is a directory, all files within it are uploaded recursively.
     When `no_rel_path` is False, the file's directory path relative to `local_path`
-    is appended to `package_version`.
+    is appended to `package_version`, recreating the local tree under the version.
 
     :param local_path: `String` path to a file or directory to upload.
     :param package_version: `String` version (virtual folder path) for the upload.
     :param package_tags: `String` tags for the package(s), separated by a `,`.
     :param no_rel_path: `Bool` if True, do not append relative path to version. Defaults to False.
     :param repo: `String` Cloudsmith repository name.
+    :param max_workers: `Int` maximum parallel uploads. Defaults to 10.
+    :raises RuntimeError: if `local_path` does not exist, or if any file fails to upload.
     """
     local_path = _resolve_param(local_path, "local_path", context="to upload.")
     repo = _resolve_param(repo, "repo", context="to upload.")
-    package_version = _resolve_param(package_version, "package_version", default="")
+    package_version = _resolve_param(package_version, "package_version", context="to upload.")
     package_tags = _resolve_param(package_tags, "package_tags")
     no_rel_path = _resolve_param(no_rel_path, "no_rel_path")
+    max_workers = _resolve_param(max_workers, "max_workers", default=10)
 
-    if package_version and not package_version.endswith("/"):
+    if not package_version.endswith("/"):
         package_version += "/"
 
-    local_path = os.path.abspath(local_path) if "/" in local_path else local_path
+    # Absolute, so the relative path below is measured against a stable base
+    # regardless of the caller's cwd.
+    local_path = os.path.abspath(local_path)
+
+    cloudsmith_repo = _format_repo(repo)
 
     # Collect files to upload
     files_to_upload = []
@@ -781,14 +903,24 @@ def upload_to_location(local_path=None, package_version=None, package_tags=None,
     else:
         raise RuntimeError(f"Cloudsmith_helper: local_path does not exist: {local_path}")
 
-    for file_path in files_to_upload:
+    # An empty directory is almost always a build that produced nothing - reporting
+    # success here would let that pass silently.
+    if not files_to_upload:
+        raise RuntimeError(f"Cloudsmith_helper: no files found to upload under {local_path}")
+
+    def upload_one(file_path):
         if no_rel_path:
             file_version = package_version
         else:
-            file_version = package_version + os.path.dirname(file_path)
+            # relpath of a file against itself is '.', whose dirname is '' - so a
+            # single-file upload correctly lands on the bare package_version.
+            rel_dir = os.path.dirname(os.path.relpath(file_path, local_path))
+            file_version = f"{package_version}{rel_dir}/" if rel_dir else package_version
 
-        logger.info(f"Uploading {file_path} to adi/{repo} with version '{file_version}'")
-        deploy_to_location(file_path, file_version, package_tags, repo=repo)
+        logger.info(f"Uploading {file_path} to {cloudsmith_repo} with version '{file_version}'")
+        deploy_to_location(file_path, file_version, package_tags, repo=cloudsmith_repo)
+
+    _run_in_parallel(upload_one, files_to_upload, "upload", max_workers)
 
 
 @_log_on_exit
@@ -916,9 +1048,23 @@ if __name__ == "__main__":
     else:
         if not args.repo:
             raise RuntimeError("Cloudsmith_helper: --repo is required.")
-        method_map = {m.__name__: m for m in available_methods}
+        method_map = {method.__name__: method for method in available_methods}
         if args.method not in method_map:
             raise RuntimeError(f"Cloudsmith_helper: Method not found: {args.method}")
         _configure_logger(True, args.debug)
+        if args.log_file:
+            # Added alongside the stderr handler, not instead of it, so a logged run is
+            # still visible in the terminal. Reuses the formatter just installed.
+            file_handler = logging.FileHandler(args.log_file)
+            file_handler.setFormatter(logger.handlers[0].formatter)
+            logger.addHandler(file_handler)
+        # Only under __main__ - importers keep their own signal disposition.
+        _install_signal_handlers()
         logger.info(args.method)
-        method_map[args.method]()
+        try:
+            method_map[args.method]()
+        except KeyboardInterrupt as exc:
+            # 130 is the conventional "terminated by SIGINT" status, so a caller (Jenkins)
+            # can tell an interrupt apart from a genuine failure, which exits non-zero too.
+            logger.error(str(exc) or "Cloudsmith_helper: interrupted")
+            sys.exit(130)
