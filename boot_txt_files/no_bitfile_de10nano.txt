@@ -1,0 +1,1 @@
+load mmc 0:1 \${loadaddr} soc_system.rbf;
