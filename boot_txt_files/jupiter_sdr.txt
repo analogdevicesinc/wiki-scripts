@@ -1,0 +1,4 @@
+setenv bootargs earlycon clk_ignore_unused root=/dev/mmcblk0p2 rw rootwait
+load mmc 0:1 0x00100000 system.dtb
+load mmc 0:1 0x00200000 Image
+booti 0x00200000 - 0x00100000
