@@ -99,10 +99,13 @@ echo '}' >> $OUTPUT_DIR/zynq.bif
 cp $FSBL_PATH $OUTPUT_DIR/fsbl.elf
 cp $SYSTEM_TOP_BIT_PATH $OUTPUT_DIR/system_top.bit
 
-### Build BOOT.BIN
+### Build BOOT.BIN and boot.scr
 (
 	cd $OUTPUT_DIR
 	bootgen -arch zynq -image zynq.bif -o BOOT.BIN -w
+	wget -O boot.txt https://raw.githubusercontent.com/analogdevicesinc/wiki-scripts/refs/heads/main/boot_txt_files/zynq.txt
+	mkimage -A arm -O linux -T script -C none -a 0 -e 0 -n "Boot script for Zynq" -d boot.txt boot.scr
+	rm -f boot.txt
 )
 
 ### Optionally tar.gz the entire output folder with the name given in argument 3
