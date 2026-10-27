@@ -149,10 +149,21 @@ cp "$FSBL_PATH" "$OUTPUT_DIR/fsbl.elf"
 cp "$SYSTEM_TOP_BIT_PATH" "$OUTPUT_DIR/system_top.bit"
 cp "$PMUFW_PATH" "$OUTPUT_DIR/pmufw.elf"
 
-### Build BOOT.BIN
+### Determine boot.txt platform for boot.scr
+_boot_carrier=$(unzip -p "$XSA_FILE" | grep -a "PATH_TO_FILE" | grep -oE "jupiter_sdr|k26|kv260" | head -n1 || true)
+case $_boot_carrier in
+	jupiter_sdr)   BOOT_TXT_PLATFORM="jupiter_sdr" ;;
+	k26|kv260)     BOOT_TXT_PLATFORM="k26" ;;
+	*)             BOOT_TXT_PLATFORM="zynqmp" ;;
+esac
+
+### Build BOOT.BIN and boot.scr
 (
 	cd $OUTPUT_DIR
 	bootgen -arch zynqmp -image zynq.bif -o BOOT.BIN -w
+	wget -O boot.txt "https://raw.githubusercontent.com/analogdevicesinc/wiki-scripts/refs/heads/main/boot_txt_files/${BOOT_TXT_PLATFORM}.txt"
+	mkimage -A arm -O linux -T script -C none -a 0 -e 0 -n "Boot script for ${BOOT_TXT_PLATFORM}" -d boot.txt boot.scr
+	rm -f boot.txt
 )
 
 ### Optionally tar.gz the entire output folder with the name given in argument 4/5

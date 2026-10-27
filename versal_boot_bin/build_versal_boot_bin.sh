@@ -146,20 +146,20 @@ echo "    { core=a72-0, exception_level=el-2, file=u-boot.elf}"         >> $OUTP
 echo "  }"                                                              >> $OUTPUT_DIR/versal.bif
 echo "}"                                                                >> $OUTPUT_DIR/versal.bif
 
-### Create boot.txt files used to create boot.src
-echo ' '                                     							>  $OUTPUT_DIR/boot.txt
-echo 'Load boot image from ${boot_target}...'							>> $OUTPUT_DIR/boot.txt
-echo 'fatload mmc 0 0x00200000 Image'        							>> $OUTPUT_DIR/boot.txt
-if (( $tool_year > 2022 )); then
-	echo 'fatload mmc 0 0x00001000 system.dtb'   						>> $OUTPUT_DIR/boot.txt
+### Determine boot.txt platform
+if [[ "$board" == "vpk180" ]]; then
+	BOOT_TXT_PLATFORM="vpk180"
+else
+	BOOT_TXT_PLATFORM="versal"
 fi
-echo 'booti 0x00200000 - 0x00001000'         							>> $OUTPUT_DIR/boot.txt
 
-### Build BOOT.BIN file and boot.src (replacement for uEnv.txt for versal boards)
+### Build BOOT.BIN file and boot.scr (replacement for uEnv.txt for versal boards)
 (
 	cd $OUTPUT_DIR
 	bootgen -image versal.bif -arch versal -o BOOT.BIN -w -log trace
-	mkimage -A arm -O linux -T script -C none -a 0 -e 0 -n "Boot script for Versal" -d boot.txt boot.scr
+	wget -O boot.txt "https://raw.githubusercontent.com/analogdevicesinc/wiki-scripts/refs/heads/main/boot_txt_files/${BOOT_TXT_PLATFORM}.txt"
+	mkimage -A arm -O linux -T script -C none -a 0 -e 0 -n "Boot script for ${BOOT_TXT_PLATFORM}" -d boot.txt boot.scr
+	rm -f boot.txt
 )
 
 ### Optionally tar.gz the entire output folder with the name given in argument 4/5
