@@ -66,9 +66,9 @@ echo "    FDT ../socfpga.dtb" >> extlinux/extlinux.conf
 echo "    APPEND root=/dev/mmcblk0p2 rw rootwait earlyprintk console=ttyS0,115200n8" >> extlinux/extlinux.conf
 
 echo "Make u-boot.scr file..."
-echo "load mmc 0:1 \${loadaddr} soc_system.rbf;" > u-boot.txt
-echo "fpga load 0 \${loadaddr} \$filesize;" >> u-boot.txt
+wget -O u-boot.txt https://raw.githubusercontent.com/analogdevicesinc/wiki-scripts/refs/heads/main/boot_txt_files/cyclone5.txt
 ./tools/mkimage -A arm -O linux -T script -C none -a 0 -e 0 -n "Cyclone V script" -d u-boot.txt u-boot.scr
+rm -f u-boot.txt
 
 echo "Done!"
 exit 0
